@@ -1,0 +1,9 @@
+# service description
+services:
+  # cloudflare tunnel
+  cloudflare-tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflare-tunnel
+    command: tunnel --no-autoupdate run 
+    environment:
+      - TUNNEL_TOKEN=<tunnel_token>
