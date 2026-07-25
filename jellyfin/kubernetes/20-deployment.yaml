@@ -73,6 +73,11 @@ spec:
               mountPath: /data/tvshows
               readOnly: true
               mountPropagation: HostToContainer
+            # New library on the rpool/data dataset (where *arr imports land).
+            - name: library
+              mountPath: /data/library
+              readOnly: true
+              mountPropagation: HostToContainer
             - name: dri
               mountPath: /dev/dri
           resources:
@@ -110,6 +115,10 @@ spec:
         - name: tvshows
           hostPath:
             path: /media/cheeky/seagate_hdd/TvShows
+            type: Directory
+        - name: library
+          hostPath:
+            path: /srv/data/media
             type: Directory
         - name: dri
           hostPath:
