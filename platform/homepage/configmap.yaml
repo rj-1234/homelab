@@ -24,6 +24,10 @@ data:
         icon: mdi-play-circle-outline
         style: row
         columns: 2
+      Downloads:
+        icon: mdi-download-circle-outline
+        style: row
+        columns: 2
       Infrastructure:
         icon: mdi-server
         style: row
@@ -36,6 +40,31 @@ data:
             description: Movies & TV
             icon: jellyfin.png
             siteMonitor: http://jellyfin.media.svc.cluster.local:8096
+            statusStyle: dot
+    - Downloads:
+        - Prowlarr:
+            href: https://cheeky-mini.tail2f4253.ts.net:9696
+            description: Indexer manager
+            icon: prowlarr.png
+            siteMonitor: http://10.43.200.20:9696
+            statusStyle: dot
+        - Radarr:
+            href: https://cheeky-mini.tail2f4253.ts.net:7878
+            description: Movies
+            icon: radarr.png
+            siteMonitor: http://10.43.200.21:7878
+            statusStyle: dot
+        - Sonarr:
+            href: https://cheeky-mini.tail2f4253.ts.net:8989
+            description: TV
+            icon: sonarr.png
+            siteMonitor: http://10.43.200.22:8989
+            statusStyle: dot
+        - qBittorrent:
+            href: https://cheeky-mini.tail2f4253.ts.net:8080
+            description: Torrent client · no VPN
+            icon: qbittorrent.png
+            siteMonitor: http://10.43.200.23:8080
             statusStyle: dot
     - Infrastructure:
         - Headlamp:
