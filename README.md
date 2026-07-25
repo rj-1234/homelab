@@ -141,12 +141,21 @@ SSH, and configure Cloudflare public hostnames + Access
 
 ## Operate
 
+Use the **[`homelab` CLI](bin/README.md)** for day-to-day ops
+(`ln -sf "$(pwd)/bin/homelab" ~/.local/bin/homelab`):
+
 ```bash
-kubectl get pods -A                                   # cluster health
-kubectl -n media logs deploy/jellyfin                 # Jellyfin logs
-kubectl -n platform create token headlamp --duration=168h   # Headlamp login token
-tailscale serve status                                # tailnet proxies
+homelab status          # nodes, pods, cloudflared, tailscale
+homelab urls            # all service URLs
+homelab token           # Headlamp login token
+homelab grafana-pw      # Grafana admin password
+homelab serve           # re-add tailnet proxies (Headlamp :443, Grafana :8443)
+homelab join-cmd        # agent-node join one-liner
+homelab debug [svc]     # diagnostics bundle
 ```
+
+Raw equivalents if you prefer: `kubectl get pods -A`,
+`kubectl -n platform create token headlamp`, `tailscale serve status`.
 
 **Add an agent node** (future):
 ```bash
