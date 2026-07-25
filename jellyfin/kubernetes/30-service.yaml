@@ -1,0 +1,20 @@
+---
+# Exposed on the node IP via k3s's built-in ServiceLB (klipper). Reach Jellyfin
+# at http://<node-ip>:8096. No DLNA/multicast, so no hostNetwork needed — point
+# clients at the address directly.
+apiVersion: v1
+kind: Service
+metadata:
+  name: jellyfin
+  namespace: media
+  labels:
+    app.kubernetes.io/name: jellyfin
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: jellyfin
+  ports:
+    - name: http
+      port: 8096
+      targetPort: http
+      protocol: TCP

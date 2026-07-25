@@ -1,0 +1,17 @@
+---
+# Jellyfin config/state. Uses the k3s default local-path provisioner, so the
+# volume lands on rpool (ZFS). Because local-path storage is node-local, the
+# pod is also pinned to this node via nodeAffinity in the Deployment — the two
+# must agree so the pod always finds its data.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellyfin-config
+  namespace: media
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi

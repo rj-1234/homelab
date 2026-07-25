@@ -1,0 +1,117 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jellyfin
+  namespace: media
+  labels:
+    app.kubernetes.io/name: jellyfin
+spec:
+  replicas: 1
+  # Config lives on a node-local (local-path) PVC and the media library is on a
+  # USB disk physically attached to this node, so never spin up a second copy
+  # elsewhere: keep a single pod, recreate in place.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jellyfin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: jellyfin
+    spec:
+      # --- Multi-node readiness -------------------------------------------
+      # Pin to the node that has the Seagate USB media store. When agent nodes
+      # join later, Jellyfin stays here. Label the node with:
+      #   kubectl label node <node> homelab/media-store=seagate
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: homelab/media-store
+                    operator: In
+                    values: ["seagate"]
+      # --- iGPU access ----------------------------------------------------
+      # renderD128 is crw-rw---- root:render (gid 992); card1 is root:video
+      # (gid 44). Adding both as supplemental groups lets the container open the
+      # devices without running privileged.
+      securityContext:
+        supplementalGroups:
+          - 992   # render
+          - 44    # video
+      containers:
+        - name: jellyfin
+          image: lscr.io/linuxserver/jellyfin:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: TZ
+              value: "America/New_York"   # host clock is US Eastern; change if wrong
+          ports:
+            - name: http
+              containerPort: 8096
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            # Transcode scratch as its own volume so it never fills the config
+            # PVC. Mounted over Jellyfin's default <config>/transcodes path.
+            - name: transcode
+              mountPath: /config/transcodes
+            - name: movies
+              mountPath: /data/movies
+              readOnly: true
+              # ntfs-3g is a FUSE mount on the host; HostToContainer propagation
+              # is required for it to be visible inside the container.
+              mountPropagation: HostToContainer
+            - name: tvshows
+              mountPath: /data/tvshows
+              readOnly: true
+              mountPropagation: HostToContainer
+            - name: dri
+              mountPath: /dev/dri
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 4Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: jellyfin-config
+        - name: transcode
+          emptyDir: {}
+        - name: movies
+          hostPath:
+            path: /media/cheeky/seagate_hdd/Movies
+            type: Directory
+        - name: tvshows
+          hostPath:
+            path: /media/cheeky/seagate_hdd/TvShows
+            type: Directory
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory

@@ -1,0 +1,19 @@
+# Template ONLY — no real secrets. Copy to values.yaml (gitignored) if you
+# prefer the official helm chart over cloudflared-deployment.yaml.
+#
+# The real token belongs in a k8s Secret, not here:
+#   kubectl -n platform create secret generic cloudflared-token \
+#     --from-literal=token=<NEW_TUNNEL_TOKEN>
+#
+# Routing (home.<domain> → homepage, jellyfin.<domain> → jellyfin) and the
+# Cloudflare Access policy are configured in the Cloudflare Zero Trust dashboard.
+
+cloudflare:
+  tunnel_token: "REPLACE_ME_use_a_k8s_Secret_instead"   # do not paste a real token here
+
+image:
+  repository: cloudflare/cloudflared
+  pullPolicy: IfNotPresent
+  tag: ""
+
+replicaCount: 2

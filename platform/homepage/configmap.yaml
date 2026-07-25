@@ -1,0 +1,66 @@
+---
+# Homepage config (https://gethomepage.dev). All standard files are provided so
+# the container never needs to write into the read-only mount. Edit tiles/links
+# here; re-apply to update.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: homepage-config
+  namespace: platform
+data:
+  settings.yaml: |
+    title: cheeky-mini homelab
+    theme: dark
+    headerStyle: clean
+    layout:
+      Media:
+        style: row
+        columns: 3
+      Infra:
+        style: row
+        columns: 3
+
+  services.yaml: |
+    - Media:
+        - Jellyfin:
+            href: https://jellyfin.ch33ky.org
+            description: Media server
+            siteMonitor: http://jellyfin.media.svc.cluster.local:8096
+            icon: jellyfin.png
+    - Infra:
+        - Headlamp:
+            href: https://cheeky-mini.CHANGEME.ts.net
+            description: Kubernetes dashboard (tailnet-only)
+            icon: kubernetes-dashboard.png
+            siteMonitor: http://headlamp.platform.svc.cluster.local
+
+  widgets.yaml: |
+    - kubernetes:
+        cluster:
+          show: true
+          cpu: true
+          memory: true
+          showLabel: true
+          label: cluster
+        nodes:
+          show: true
+          cpu: true
+          memory: true
+    - resources:
+        cpu: true
+        memory: true
+    - search:
+        provider: duckduckgo
+        target: _blank
+
+  bookmarks.yaml: |
+    - Homelab:
+        - Repo:
+            - abbr: GH
+              href: https://github.com/rj-1234/homelab
+
+  kubernetes.yaml: |
+    mode: cluster
+
+  docker.yaml: |
+    # (unused — no Docker; k3s only)
