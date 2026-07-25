@@ -70,6 +70,9 @@ metadata:
     app.kubernetes.io/name: headlamp
 spec:
   type: ClusterIP
+  # Pinned so `tailscale serve` on the host has a stable target across service
+  # recreation (host reaches ClusterIP directly on this single node).
+  clusterIP: 10.43.142.241
   selector:
     app.kubernetes.io/name: headlamp
   ports:

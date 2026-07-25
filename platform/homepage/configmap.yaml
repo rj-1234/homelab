@@ -29,7 +29,7 @@ data:
             icon: jellyfin.png
     - Infra:
         - Headlamp:
-            href: https://cheeky-mini.CHANGEME.ts.net
+            href: https://cheeky-mini.tail2f4253.ts.net
             description: Kubernetes dashboard (tailnet-only)
             icon: kubernetes-dashboard.png
             siteMonitor: http://headlamp.platform.svc.cluster.local
