@@ -16,3 +16,4 @@ cloudflare-tunnel/kubernetes/values.yaml
 graphify-out/
 k8-dashboard/
 k8/
+.codegraph/
