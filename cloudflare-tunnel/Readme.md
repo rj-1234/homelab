@@ -1,40 +1,35 @@
-# Installation
-Cloudflare's tunnel client that runs on the client machine enabling secure tunnel connection.
+# Cloudflare Tunnel
 
-## Deployment
+Outbound-only connector exposing selected services on the public domain
+(`home.ch33ky.org`, `jellyfin.ch33ky.org`) without opening any inbound ports.
+Runs in k3s as a Deployment; the tunnel is **remotely managed** — hostname →
+service routing lives in the Cloudflare Zero Trust dashboard.
 
-### Docker
-Fast and easy way to deploy the cloudflare client. This will pull and deploy the latest `cloudflare/cloudflared` image into a container.
+## Deploy
 
-> [!NOTE]  
-> The tunnel connection will break if this container stops or exits for any reason and fails to auto restart.
+1. Create the tunnel in Cloudflare Zero Trust → Networks → Tunnels (type
+   `Cloudflared`), copy its connector **token**.
+2. Store the token as a k8s Secret (never committed):
+   ```bash
+   kubectl -n platform create secret generic cloudflared-token \
+     --from-literal=token='<TOKEN>'
+   ```
+3. Apply the connector:
+   ```bash
+   kubectl apply -f kubernetes/cloudflared-deployment.yaml
+   kubectl -n platform rollout status deploy/cloudflared
+   ```
+   Connector shows **HEALTHY** in the dashboard.
 
-```bash
-# cd </path/to/docker-compose.yml>
-docker-compose up
-```
+## Routing (dashboard → tunnel → Public Hostnames)
 
-### Kubernetes 
-Configurable and scalable way that deploys the image and lets it scale on multiple pods.
+| Hostname | Service | Auth |
+|---|---|---|
+| `home.ch33ky.org` | `http://homepage.platform.svc.cluster.local:3000` | Cloudflare Access (email) |
+| `jellyfin.ch33ky.org` | `http://jellyfin.media.svc.cluster.local:8096` | Jellyfin's own login |
 
-Source : https://github.com/cloudflare/helm-charts/tree/main
+Type is **HTTP** (pods serve plain HTTP). Protect `home` with an Access policy;
+leave `jellyfin` on its own auth so native apps work.
 
-#### About
-A convenient location to publish Cloudflare helm charts
-
-#### Setup
-```bash
-helm repo add cloudflare https://cloudflare.github.io/helm-charts
-helm repo update
-```
-
-#### Discovery
-```bash
-helm search repo cloudflare
-```
-
-#### Install
-```bash
-# cd </path/to/values.yaml>
-helm install cloudflare cloudflare-tunnel-remote --values values.yaml
-```
+> Secrets never live in the repo. `kubernetes/values.yaml` is gitignored;
+> `values.example.yaml` is the template for the optional helm-chart path.

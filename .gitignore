@@ -10,3 +10,9 @@ kubeconfig
 
 # The old Cloudflare helm values held a live tunnel token — keep it untracked.
 cloudflare-tunnel/kubernetes/values.yaml
+
+# Local / generated / retired — keep on disk, never commit
+.claude/
+graphify-out/
+k8-dashboard/
+k8/
