@@ -1,0 +1,252 @@
+#!/usr/bin/env bash
+# homelab — management CLI for the cheeky-mini k3s homelab.
+# Zero deps beyond kubectl/tailscale/sudo. Host-first (run on the k3s node);
+# the kubectl-only recipes also work from a remote admin machine with a valid
+# KUBECONFIG. See `homelab help`.
+set -euo pipefail
+
+# ---- config (override via env) --------------------------------------------
+: "${KUBECONFIG:=/etc/rancher/k3s/k3s.yaml}"
+export KUBECONFIG
+DOMAIN="${HOMELAB_DOMAIN:-ch33ky.org}"
+TAILNET_HOST="${HOMELAB_TAILNET_HOST:-cheeky-mini.tail2f4253.ts.net}"
+GRAFANA_TS_PORT="${HOMELAB_GRAFANA_TS_PORT:-8443}"
+HEADLAMP_IP="${HOMELAB_HEADLAMP_IP:-10.43.142.241}"   # pinned ClusterIP
+GRAFANA_IP="${HOMELAB_GRAFANA_IP:-10.43.200.10}"       # pinned ClusterIP
+# repo root = parent of this script's dir
+REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+
+# ---- helpers --------------------------------------------------------------
+c_red=$'\033[31m'; c_grn=$'\033[32m'; c_ylw=$'\033[33m'; c_dim=$'\033[2m'; c_off=$'\033[0m'
+info() { printf '%s==>%s %s\n' "$c_grn" "$c_off" "$*"; }
+warn() { printf '%s!!%s %s\n'  "$c_ylw" "$c_off" "$*" >&2; }
+die()  { printf '%sxx%s %s\n'  "$c_red" "$c_off" "$*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "missing required tool: $1"; }
+k()    { kubectl "$@"; }
+
+# service -> "namespace deployment"
+svc_map() {
+  case "$1" in
+    jellyfin)   echo "media jellyfin" ;;
+    homepage)   echo "platform homepage" ;;
+    headlamp)   echo "platform headlamp" ;;
+    cloudflared)echo "platform cloudflared" ;;
+    grafana)    echo "monitoring monitoring-grafana" ;;
+    prometheus) echo "monitoring prometheus-monitoring-kube-prometheus-prometheus" ;;
+    *) return 1 ;;
+  esac
+}
+svc_ns()   { svc_map "$1" | awk '{print $1}'; }
+svc_dep()  { svc_map "$1" | awk '{print $2}'; }
+
+server_ip() { hostname -I | awk '{print $1}'; }
+
+# ---- creds & secrets ------------------------------------------------------
+cmd_token() {  # headlamp login bearer token
+  need kubectl
+  k -n platform create token headlamp --duration="${1:-168h}"
+}
+cmd_grafana_pw() {
+  need kubectl
+  k -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d; echo
+}
+cmd_set_cf_token() {  # rotate cloudflared connector token
+  need kubectl
+  printf 'Paste new Cloudflare tunnel token (starts eyJ): '
+  read -r tok
+  [ -n "$tok" ] || die "empty token"
+  k -n platform delete secret cloudflared-token --ignore-not-found
+  k -n platform create secret generic cloudflared-token --from-literal=token="$tok"
+  k -n platform rollout restart deploy/cloudflared
+  info "cloudflared-token replaced + restarted"
+}
+cmd_set_grafana_pw() {
+  need kubectl
+  local pw="${1:-}"; [ -n "$pw" ] || pw="$(openssl rand -base64 18)"
+  k -n monitoring create secret generic grafana-admin \
+    --from-literal=admin-user=admin --from-literal=admin-password="$pw" \
+    --dry-run=client -o yaml | k apply -f -
+  k -n monitoring rollout restart deploy/monitoring-grafana
+  info "grafana password set -> admin / $pw"
+}
+cmd_check_secrets() {
+  need kubectl; local ok=0
+  for s in "platform cloudflared-token" "monitoring grafana-admin"; do
+    ns="${s% *}"; name="${s#* }"
+    if k -n "$ns" get secret "$name" >/dev/null 2>&1; then
+      printf '%s ok%s   %s/%s\n' "$c_grn" "$c_off" "$ns" "$name"
+    else
+      printf '%s miss%s %s/%s\n' "$c_red" "$c_off" "$ns" "$name"; ok=1
+    fi
+  done
+  return $ok
+}
+
+# ---- status & urls --------------------------------------------------------
+cmd_status() {
+  need kubectl
+  info "nodes"; k get nodes -o wide
+  echo; info "pods (non-Running highlighted)"
+  k get pods -A --no-headers | awk -v r="$c_red" -v o="$c_off" \
+    '{s=$4} s!="Running" && s!="Completed" {print r $0 o; next} {print}'
+  echo; info "cloudflared"
+  k -n platform get deploy cloudflared -o wide 2>/dev/null || warn "cloudflared not deployed"
+  if command -v tailscale >/dev/null 2>&1; then
+    echo; info "tailscale"; tailscale status 2>/dev/null | head -5
+    echo; info "tailscale serve"; tailscale serve status 2>/dev/null || sudo tailscale serve status 2>/dev/null || true
+  fi
+}
+cmd_urls() {
+  cat <<EOF
+Public (Cloudflare):
+  Homepage    https://home.$DOMAIN        (behind Cloudflare Access)
+  Jellyfin    https://jellyfin.$DOMAIN
+
+Private (Tailscale):
+  Headlamp    https://$TAILNET_HOST
+  Grafana     https://$TAILNET_HOST:$GRAFANA_TS_PORT
+
+LAN:
+  Jellyfin    http://$(server_ip):8096
+EOF
+}
+cmd_health() {
+  need kubectl
+  local pf="curl -s -o /dev/null -w"
+  declare -A t=(
+    [jellyfin]="http://jellyfin.media.svc.cluster.local:8096/health"
+    [homepage]="http://homepage.platform.svc.cluster.local:3000/"
+    [headlamp]="http://$HEADLAMP_IP:80/"
+    [grafana]="http://$GRAFANA_IP:80/api/health"
+  )
+  for name in "${!t[@]}"; do
+    code=$(k -n platform run hl-health-$$-"$name" --rm -i --restart=Never -q \
+      --image=curlimages/curl:latest --command -- \
+      $pf '%{http_code}' -H "Host: $name" --max-time 6 "${t[$name]}" 2>/dev/null || echo ERR)
+    printf '%-10s %s\n' "$name" "$code"
+  done
+}
+
+# ---- deploy & serve -------------------------------------------------------
+cmd_apply() {
+  need kubectl
+  case "${1:-all}" in
+    jellyfin)   k apply -k "$REPO/jellyfin/kubernetes/" ;;
+    platform)   k apply -f "$REPO/platform/00-namespace.yaml"
+                k apply -f "$REPO/platform/headlamp/" -f "$REPO/platform/homepage/"
+                k apply -f "$REPO/cloudflare-tunnel/kubernetes/cloudflared-deployment.yaml" ;;
+    monitoring) k apply -f "$REPO/platform/monitoring/grafana-tailnet-svc.yaml"
+                warn "helm-managed stack: use 'helm upgrade' with platform/monitoring/values.yaml" ;;
+    all)        cmd_apply jellyfin; cmd_apply platform; cmd_apply monitoring ;;
+    *) die "unknown target: $1 (jellyfin|platform|monitoring|all)" ;;
+  esac
+}
+cmd_serve() {  # idempotent tailnet exposure for admin UIs
+  need tailscale
+  sudo tailscale serve --bg --https=443  "http://$HEADLAMP_IP:80"
+  sudo tailscale serve --bg --https="$GRAFANA_TS_PORT" "http://$GRAFANA_IP:80"
+  info "serving Headlamp :443 + Grafana :$GRAFANA_TS_PORT on $TAILNET_HOST"
+  sudo tailscale serve status
+}
+cmd_restart() {
+  need kubectl; [ $# -ge 1 ] || die "usage: homelab restart <svc>"
+  local ns dep; ns="$(svc_ns "$1")" || die "unknown svc: $1"; dep="$(svc_dep "$1")"
+  k -n "$ns" rollout restart deploy/"$dep"
+  k -n "$ns" rollout status deploy/"$dep"
+}
+cmd_logs() {
+  need kubectl; [ $# -ge 1 ] || die "usage: homelab logs <svc> [-f]"
+  local svc="$1"; shift; local ns dep; ns="$(svc_ns "$svc")" || die "unknown svc: $svc"; dep="$(svc_dep "$svc")"
+  k -n "$ns" logs deploy/"$dep" --tail=100 "$@"
+}
+
+# ---- node-join & debug ----------------------------------------------------
+cmd_join_cmd() {
+  local ip tok; ip="$(server_ip)"
+  tok="$(sudo cat /var/lib/rancher/k3s/server/node-token 2>/dev/null)" \
+    || die "need sudo to read node-token (run on the server node)"
+  cat <<EOF
+# Run on the NEW agent node:
+curl -sfL https://get.k3s.io | K3S_URL=https://$ip:6443 K3S_TOKEN=$tok sh -
+
+# Then, back here, label it if it should run specific workloads, e.g.:
+#   kubectl label node <new-node> homelab/media-store=seagate
+EOF
+}
+cmd_debug() {
+  need kubectl
+  info "non-ready pods"
+  k get pods -A --field-selector=status.phase!=Running --no-headers 2>/dev/null \
+    | grep -v Completed || echo "  (all Running)"
+  echo; info "recent events"
+  k get events -A --sort-by=.lastTimestamp 2>/dev/null | tail -15
+  echo; info "node conditions"
+  k get nodes -o "custom-columns=NAME:.metadata.name,READY:.status.conditions[-1].type,REASON:.status.conditions[-1].reason"
+  echo; info "disk / zfs"
+  df -h / /media/cheeky/seagate_hdd 2>/dev/null || true
+  command -v zfs >/dev/null && zfs list -o name,used,avail,mountpoint 2>/dev/null | head
+  echo; info "iGPU / media mount"
+  ls -l /dev/dri 2>/dev/null || warn "no /dev/dri"
+  findmnt /media/cheeky/seagate_hdd -o SOURCE,FSTYPE,OPTIONS 2>/dev/null || warn "USB not mounted"
+  if command -v tailscale >/dev/null; then echo; info "tailscale"; tailscale status 2>/dev/null | head -3; fi
+  if [ "${1:-}" != "" ]; then
+    local ns dep; ns="$(svc_ns "$1")" || die "unknown svc: $1"; dep="$(svc_dep "$1")"
+    echo; info "describe $1"; k -n "$ns" describe deploy/"$dep" | tail -30
+    echo; info "logs $1"; k -n "$ns" logs deploy/"$dep" --tail=30 2>&1 || true
+  fi
+}
+
+# ---- dispatch -------------------------------------------------------------
+usage() {
+  cat <<EOF
+homelab — cheeky-mini k3s management CLI
+
+Creds & secrets:
+  token [dur]          Headlamp login bearer token (default 168h)
+  grafana-pw           print Grafana admin password
+  set-cf-token         paste + store a new cloudflared tunnel token, restart
+  set-grafana-pw [pw]  set/rotate Grafana password (random if omitted)
+  check-secrets        verify required secrets exist
+
+Status & URLs:
+  status               nodes, pods, cloudflared, tailscale
+  urls                 all service URLs (public + tailnet + LAN)
+  health               HTTP health check each service
+
+Deploy & serve:
+  apply [target]       kubectl apply  (jellyfin|platform|monitoring|all)
+  serve                (re)establish tailscale serve: Headlamp :443, Grafana :$GRAFANA_TS_PORT
+  restart <svc>        rollout restart a service
+  logs <svc> [-f]      tail a service's logs
+
+Node-join & debug:
+  join-cmd             print the agent-node join one-liner
+  debug [svc]          diagnostics bundle (+ describe/logs for <svc>)
+
+svc = jellyfin | homepage | headlamp | cloudflared | grafana | prometheus
+Config via env: HOMELAB_DOMAIN, HOMELAB_TAILNET_HOST, KUBECONFIG, ...
+EOF
+}
+
+main() {
+  local cmd="${1:-help}"; shift || true
+  case "$cmd" in
+    token)          cmd_token "$@" ;;
+    grafana-pw)     cmd_grafana_pw ;;
+    set-cf-token)   cmd_set_cf_token ;;
+    set-grafana-pw) cmd_set_grafana_pw "$@" ;;
+    check-secrets)  cmd_check_secrets ;;
+    status)         cmd_status ;;
+    urls)           cmd_urls ;;
+    health)         cmd_health ;;
+    apply)          cmd_apply "$@" ;;
+    serve)          cmd_serve ;;
+    restart)        cmd_restart "$@" ;;
+    logs)           cmd_logs "$@" ;;
+    join-cmd)       cmd_join_cmd ;;
+    debug)          cmd_debug "$@" ;;
+    help|-h|--help) usage ;;
+    *) warn "unknown command: $cmd"; echo; usage; exit 1 ;;
+  esac
+}
+main "$@"

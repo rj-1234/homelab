@@ -1,0 +1,99 @@
+---
+# Homepage config (https://gethomepage.dev). All standard files are provided so
+# the container never needs to write into the read-only mount. Edit tiles/links
+# here; re-apply + rollout restart to update.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: homepage-config
+  namespace: platform
+data:
+  settings.yaml: |
+    title: cheeky-mini
+    theme: dark
+    color: slate
+    headerStyle: boxedWidgets
+    target: _blank
+    iconStyle: theme
+    hideVersion: true
+    useEqualHeights: true
+    # 2 columns keeps tiles large and readable; Homepage stacks them to a single
+    # column on narrow (mobile) viewports automatically.
+    layout:
+      Media:
+        icon: mdi-play-circle-outline
+        style: row
+        columns: 2
+      Infrastructure:
+        icon: mdi-server
+        style: row
+        columns: 2
+
+  services.yaml: |
+    - Media:
+        - Jellyfin:
+            href: https://jellyfin.ch33ky.org
+            description: Movies & TV
+            icon: jellyfin.png
+            siteMonitor: http://jellyfin.media.svc.cluster.local:8096
+            statusStyle: dot
+    - Infrastructure:
+        - Headlamp:
+            href: https://cheeky-mini.tail2f4253.ts.net
+            description: Kubernetes dashboard · tailnet-only
+            icon: headlamp.png
+            siteMonitor: http://headlamp.platform.svc.cluster.local
+            statusStyle: dot
+        - Grafana:
+            href: https://cheeky-mini.tail2f4253.ts.net:8443
+            description: Metrics & dashboards · tailnet-only
+            icon: grafana.png
+            siteMonitor: http://10.43.200.10:80
+            statusStyle: dot
+        - Cloudflare Tunnel:
+            href: https://one.dash.cloudflare.com
+            description: Public ingress · ch33ky.org
+            icon: cloudflare-zero-trust.png
+
+  widgets.yaml: |
+    - greeting:
+        text_size: 4xl
+        text: cheeky-mini homelab
+    - datetime:
+        text_size: xl
+        format:
+          dateStyle: full
+          timeStyle: short
+          hourCycle: h23
+    - kubernetes:
+        cluster:
+          show: true
+          cpu: true
+          memory: true
+          showLabel: true
+          label: cluster
+        nodes:
+          show: false
+    - resources:
+        label: node
+        cpu: true
+        memory: true
+        uptime: true
+    - search:
+        provider: duckduckgo
+        target: _blank
+
+  bookmarks.yaml: |
+    - Homelab:
+        - Repo:
+            - abbr: GH
+              href: https://github.com/rj-1234/homelab
+        - Jellyfin:
+            - abbr: JF
+              href: https://jellyfin.ch33ky.org
+
+  kubernetes.yaml: |
+    mode: cluster
+
+  docker.yaml: |
+    # (unused — no Docker; k3s only)

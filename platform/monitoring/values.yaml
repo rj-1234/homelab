@@ -1,0 +1,77 @@
+# kube-prometheus-stack values for single-node k3s (cheeky-mini).
+# Install:
+#   helm install monitoring prometheus-community/kube-prometheus-stack \
+#     -n monitoring -f platform/monitoring/values.yaml
+#
+# No secrets here — Grafana admin creds come from the `grafana-admin` Secret
+# created out-of-band (see platform/monitoring/README.md).
+
+# --- k3s fixes -------------------------------------------------------------
+# k3s runs control-plane components in one process, bound to localhost, so the
+# default ServiceMonitors for these never scrape (perpetual red targets).
+# Disable them; the useful signals (nodes, pods, kubelet, kube-state) stay on.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false
+
+# --- Alertmanager: off (dashboards-only for now, saves RAM) ----------------
+alertmanager:
+  enabled: false
+
+# --- Prometheus ------------------------------------------------------------
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        memory: 1536Mi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+
+# --- Grafana (ClusterIP; reached tailnet-only via `tailscale serve`) --------
+grafana:
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  service:
+    type: ClusterIP
+  persistence:
+    enabled: true
+    storageClassName: local-path
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  # Served under a tailnet path/port, not root of a domain.
+  grafana.ini:
+    server:
+      root_url: "https://cheeky-mini.tail2f4253.ts.net:8443"
+      serve_from_sub_path: false
+
+# node-exporter + kube-state-metrics stay enabled (defaults) for host + k8s
+# metrics. Lower node-exporter footprint slightly:
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 64Mi

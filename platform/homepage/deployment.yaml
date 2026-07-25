@@ -1,0 +1,92 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homepage
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: homepage
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: homepage
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: homepage
+    spec:
+      serviceAccountName: homepage
+      # Homepage writes into /app/config on boot (custom.css/js skeleton), so it
+      # can't be a read-only ConfigMap mount. Seed the ConfigMap into a writable
+      # emptyDir once, then let Homepage own the dir.
+      initContainers:
+        - name: seed-config
+          image: busybox:1.37
+          command: ["sh", "-c", "cp -r /config-src/. /app/config/ 2>/dev/null; true"]
+          volumeMounts:
+            - name: config-src
+              mountPath: /config-src
+            - name: config
+              mountPath: /app/config
+      containers:
+        - name: homepage
+          image: ghcr.io/gethomepage/homepage:latest
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            # Homepage rejects requests with an unlisted Host header. Add the
+            # public domain once known, plus the localhost:port used for
+            # `kubectl port-forward` testing. Comma-separated.
+            - name: HOMEPAGE_ALLOWED_HOSTS
+              value: "localhost:3000,localhost:8081,home.ch33ky.org,cheeky-mini"
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: localhost:3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: localhost:3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: config
+          emptyDir: {}
+        - name: config-src
+          configMap:
+            name: homepage-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: homepage
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: homepage
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: homepage
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

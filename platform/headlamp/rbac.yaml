@@ -1,0 +1,25 @@
+---
+# Headlamp runs in-cluster and is reached ONLY over the tailnet (tailscale serve).
+# Login is via this ServiceAccount's bearer token:
+#   kubectl -n platform create token headlamp --duration=24h
+# cluster-admin is acceptable here because access is gated at the network layer
+# (tailnet-only, never exposed through Cloudflare). Tighten the role later if you
+# add multiple users.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: headlamp
+  namespace: platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: headlamp-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: headlamp
+    namespace: platform

@@ -1,0 +1,19 @@
+# Secrets — never commit. Real secrets live in k8s Secrets (created via kubectl),
+# not in the repo. Commit sanitized *.example.yaml templates instead.
+*.secret.yaml
+*secret*.yaml
+cloudflared-token*
+*.pem
+*.key
+kubeconfig
+.env
+
+# The old Cloudflare helm values held a live tunnel token — keep it untracked.
+cloudflare-tunnel/kubernetes/values.yaml
+
+# Local / generated / retired — keep on disk, never commit
+.claude/
+graphify-out/
+k8-dashboard/
+k8/
+.codegraph/
