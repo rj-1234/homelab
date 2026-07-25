@@ -1,0 +1,22 @@
+---
+# Stable-IP Service for Grafana so the host-side `tailscale serve` target never
+# changes (the helm-managed Service gets a dynamic ClusterIP). Reached only over
+# the tailnet: `sudo tailscale serve --bg --https=8443 http://10.43.200.10:80`
+# -> https://cheeky-mini.tail2f4253.ts.net:8443
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-tailnet
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: grafana
+spec:
+  type: ClusterIP
+  clusterIP: 10.43.200.10
+  selector:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/instance: monitoring
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000

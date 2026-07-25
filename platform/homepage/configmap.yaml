@@ -44,6 +44,12 @@ data:
             icon: headlamp.png
             siteMonitor: http://headlamp.platform.svc.cluster.local
             statusStyle: dot
+        - Grafana:
+            href: https://cheeky-mini.tail2f4253.ts.net:8443
+            description: Metrics & dashboards · tailnet-only
+            icon: grafana.png
+            siteMonitor: http://10.43.200.10:80
+            statusStyle: dot
         - Cloudflare Tunnel:
             href: https://one.dash.cloudflare.com
             description: Public ingress · ch33ky.org
