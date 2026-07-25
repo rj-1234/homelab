@@ -39,6 +39,8 @@ spec:
             # Single /data root so downloads + library share a filesystem
             # (hardlinks + atomic moves; no copy). TRaSH-guides layout.
             - { name: data, mountPath: /data }
+            # Existing USB library (ntfs-3g FUSE) so Radarr can Library-Import it.
+            - { name: usb-movies, mountPath: /media/movies, mountPropagation: HostToContainer }
           resources:
             requests: { cpu: 25m, memory: 128Mi }
             limits:   { memory: 512Mi }
@@ -46,6 +48,8 @@ spec:
         - { name: config, persistentVolumeClaim: { claimName: radarr-config } }
         - name: data
           hostPath: { path: /srv/data, type: Directory }
+        - name: usb-movies
+          hostPath: { path: /media/cheeky/seagate_hdd/Movies, type: Directory }
 ---
 apiVersion: v1
 kind: Service

@@ -37,6 +37,8 @@ spec:
           volumeMounts:
             - { name: config, mountPath: /config }
             - { name: data, mountPath: /data }
+            # Existing USB library (ntfs-3g FUSE) so Sonarr can Library-Import it.
+            - { name: usb-tv, mountPath: /media/tv, mountPropagation: HostToContainer }
           resources:
             requests: { cpu: 25m, memory: 128Mi }
             limits:   { memory: 512Mi }
@@ -44,6 +46,8 @@ spec:
         - { name: config, persistentVolumeClaim: { claimName: sonarr-config } }
         - name: data
           hostPath: { path: /srv/data, type: Directory }
+        - name: usb-tv
+          hostPath: { path: /media/cheeky/seagate_hdd/TvShows, type: Directory }
 ---
 apiVersion: v1
 kind: Service
