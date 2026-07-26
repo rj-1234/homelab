@@ -23,10 +23,12 @@ spec:
           image: paddlepaddle/paddle:2.6.2
           command: ["sh", "-c"]
           args:
-            # paddlepaddle itself is already in the image; add the rest.
+            # OCR runs on RapidOCR (PP-OCR models on ONNXRuntime) — same models
+            # as Paddle but a few hundred MB instead of >6Gi. The base image
+            # still supplies the OpenCV/system libs opencv-python links against.
             - pip install --target=/deps --no-cache-dir
               'psycopg[binary]>=3.2' puremagic 'pymupdf>=1.24'
-              'paddleocr>=2.9,<3' anthropic pillow-heif
+              'rapidocr-onnxruntime>=1.3,<2' anthropic pillow-heif
               google-api-python-client google-auth
           volumeMounts: [{ name: deps, mountPath: /deps }]
       containers:
@@ -46,8 +48,8 @@ spec:
             # embed-worker (60-embed-worker.yaml) so a slow doc never blocks these.
             - { name: WORKER_STAGES, value: "text,ocr" }
             - { name: WORKER_INGEST, value: "true" }
-            # Paddle downloads recognition models under $HOME/.paddleocr — point
-            # HOME at the dataset so the ~10MB models persist across restarts.
+            # RapidOCR ships its PP-OCR models inside the wheel (no runtime
+            # download); HOME just needs to be a writable path.
             - { name: HOME, value: /srv/docs/.paddle }
             # Image ships Paddle in site-packages; /deps adds our libs on top.
             - { name: PYTHONPATH, value: "/deps:/app/src" }
@@ -61,7 +63,7 @@ spec:
             - { name: gmail, mountPath: /secrets/gmail, readOnly: true }
           resources:
             requests: { cpu: 250m, memory: 512Mi }
-            limits: { memory: 3Gi }   # Paddle + models are memory-hungry
+            limits: { memory: 2Gi }   # RapidOCR (ONNX) peaks ~550Mi on a full-page scan
       volumes:
         - { name: deps, emptyDir: {} }
         - name: app

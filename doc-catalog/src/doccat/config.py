@@ -27,7 +27,7 @@ QUIESCENCE_AGE = int(os.environ.get("QUIESCENCE_AGE", "10"))
 # --- OCR (Phase 4) ----------------------------------------------------------
 # PaddleOCR runs locally (CPU). Pages whose mean recognition confidence falls
 # below the threshold escalate to Claude vision (if ANTHROPIC_API_KEY is set).
-OCR_DPI = int(os.environ.get("OCR_DPI", "220"))          # pdf page raster DPI
+OCR_DPI = int(os.environ.get("OCR_DPI", "150"))          # pdf page raster DPI (memory vs. accuracy)
 OCR_CONF_THRESHOLD = float(os.environ.get("OCR_CONF_THRESHOLD", "0.6"))
 CLAUDE_VISION_MODEL = os.environ.get("CLAUDE_VISION_MODEL", "claude-opus-5")
 
@@ -91,3 +91,6 @@ EMBED_PAGES = os.environ.get("EMBED_PAGES", "false").lower() in ("1", "true", "y
 WORKER_STAGES = tuple(filter(None, os.environ.get(
     "WORKER_STAGES", "text,ocr,embed").split(",")))
 WORKER_INGEST = os.environ.get("WORKER_INGEST", "true").lower() in ("1", "true", "yes")
+# A job left 'running' longer than this (its worker died mid-job) is reclaimed to
+# 'pending' by reconcile(). Set above the slowest expected stage runtime.
+JOB_STALE_SECONDS = int(os.environ.get("JOB_STALE_SECONDS", "900"))  # 15 min

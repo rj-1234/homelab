@@ -1,6 +1,9 @@
-"""OCR (Phase 4): PaddleOCR locally, escalate low-confidence pages to Claude.
+"""OCR (Phase 4): RapidOCR locally, escalate low-confidence pages to Claude.
 
-Heavy imports (paddleocr, anthropic, PIL) are done lazily so the rest of the
+RapidOCR runs the same PP-OCR detection/recognition models as PaddleOCR but on
+ONNXRuntime, which keeps CPU inference to a few hundred MB — the Paddle
+framework blew past 6Gi on a single scanned page (per-thread arena explosion).
+Heavy imports (rapidocr, anthropic, PIL) are done lazily so the rest of the
 package still imports on a plain interpreter without them. Pages are rasterized
 with PyMuPDF; HEIC/other images are normalized to PNG (pillow + pillow-heif).
 """
@@ -14,11 +17,11 @@ from . import config
 _engine = None
 
 
-def _paddle():
+def _rapid():
     global _engine
     if _engine is None:
-        from paddleocr import PaddleOCR
-        _engine = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
+        from rapidocr_onnxruntime import RapidOCR
+        _engine = RapidOCR()
     return _engine
 
 
@@ -49,18 +52,16 @@ def pages_for(path, mime):
         yield 1, _image_png(path)
 
 
-def paddle_png(png_bytes):
-    """Return (text, mean_confidence) for one page image via PaddleOCR."""
+def ocr_png(png_bytes):
+    """Return (text, mean_confidence) for one page image via RapidOCR."""
     import numpy as np
     from PIL import Image
     img = np.array(Image.open(io.BytesIO(png_bytes)).convert("RGB"))
-    result = _paddle().ocr(img, cls=True)
+    result, _ = _rapid()(img)                   # (list | None, timing)
     lines, confs = [], []
-    for page in result or []:
-        for box_text in page or []:
-            text, score = box_text[1]           # entry = [box, (text, score)]
-            lines.append(text)
-            confs.append(float(score))
+    for box, text, score in result or []:       # entry = [box, text, score]
+        lines.append(text)
+        confs.append(float(score))
     return "\n".join(lines), (sum(confs) / len(confs) if confs else 0.0)
 
 

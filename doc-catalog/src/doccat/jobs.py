@@ -43,17 +43,25 @@ def claim(stages=None):
 
 
 def reconcile(stages=None):
-    """Requeue jobs that failed but haven't exhausted MAX_ATTEMPTS (e.g. failed
-    under an older lower cap, or manually re-run). Scoped to `stages` when given
-    so each worker only reconciles its own. Idempotent; called once per loop.
-    Prior error text is kept until the retry succeeds or truly fails."""
-    sql = "UPDATE job SET state='pending' WHERE state='failed' AND attempts < %s"
-    params = [MAX_ATTEMPTS]
+    """Requeue retryable jobs so nothing stalls forever. Two cases: (a) 'failed'
+    jobs that haven't exhausted MAX_ATTEMPTS (failed under an older cap, or a
+    manual re-run), and (b) 'running' jobs whose lock is older than
+    JOB_STALE_SECONDS — a worker that died mid-job leaves them 'running', and
+    claim() only takes 'pending', so without this they'd never retry. Scoped to
+    `stages` when given. Idempotent; called once per loop."""
+    stage_clause, stage_param = "", []
     if stages:
-        sql += " AND stage = ANY(%s)"
-        params.append(list(stages))
+        stage_clause = " AND stage = ANY(%s)"
+        stage_param = [list(stages)]
     with db.connect() as c:
-        n = c.execute(sql, params).rowcount
+        n = c.execute(
+            "UPDATE job SET state='pending' WHERE state='failed' AND attempts < %s"
+            + stage_clause, [MAX_ATTEMPTS] + stage_param).rowcount
+        n += c.execute(
+            "UPDATE job SET state='pending' WHERE state='running'"
+            " AND locked_at < now() - make_interval(secs => %s) AND attempts < %s"
+            + stage_clause,
+            [config.JOB_STALE_SECONDS, MAX_ATTEMPTS] + stage_param).rowcount
     if n:
         log.info("jobs.reconciled", requeued=n, stages=list(stages) if stages else "all")
     return n
@@ -105,9 +113,9 @@ def _run_ocr(cur, doc_id):
     have_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
     any_text = False
     for pno, png in ocr.pages_for(path, mime):
-        engine, conf = "paddleocr", 0.0
+        engine, conf = "rapidocr", 0.0
         try:
-            text, conf = ocr.paddle_png(png)
+            text, conf = ocr.ocr_png(png)
         except Exception as e:  # noqa: BLE001 — a bad page shouldn't kill the doc
             text = ""
             log.warn("ocr.paddle_failed", doc=doc_id, page=pno, error=str(e))
