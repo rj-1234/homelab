@@ -28,6 +28,10 @@ data:
         icon: mdi-download-circle-outline
         style: row
         columns: 2
+      Documents:
+        icon: mdi-file-document-multiple-outline
+        style: row
+        columns: 2
       Infrastructure:
         icon: mdi-server
         style: row
@@ -65,6 +69,19 @@ data:
             description: Torrent client · no VPN
             icon: qbittorrent.png
             siteMonitor: http://10.43.200.23:8080
+            statusStyle: dot
+    - Documents:
+        - FileBrowser:
+            href: https://cheeky-mini.tail2f4253.ts.net:8090
+            description: Upload & inbox · doc catalog
+            icon: filebrowser.png
+            siteMonitor: http://10.43.200.31:8080
+            statusStyle: dot
+        - Catalog:
+            href: https://cheeky-mini.tail2f4253.ts.net:8091
+            description: Document list · searchable
+            icon: mdi-file-search-outline
+            siteMonitor: http://10.43.200.30:8000/healthz
             statusStyle: dot
     - Infrastructure:
         - Headlamp:
