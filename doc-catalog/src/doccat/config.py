@@ -41,8 +41,10 @@ GMAIL_POLL_INTERVAL = int(os.environ.get("GMAIL_POLL_INTERVAL", "300"))   # 5 mi
 # GMAIL_ATTACH_EXT is appended automatically so the list returns only doc-bearing
 # messages — Gmail filters server-side and we fetch far fewer messages.
 GMAIL_INITIAL_QUERY = os.environ.get("GMAIL_INITIAL_QUERY", "newer_than:1y")
-# Skip small attachments (signature logos/icons). 0 disables the floor.
-GMAIL_MIN_ATTACH_BYTES = int(os.environ.get("GMAIL_MIN_ATTACH_BYTES", str(8 * 1024)))
+# Optional minimum attachment size. Default 0 (off): the docs-only MIME/extension
+# allowlist already excludes newsletter images, and a floor here just discards
+# legitimate small PDFs (receipts, short letters).
+GMAIL_MIN_ATTACH_BYTES = int(os.environ.get("GMAIL_MIN_ATTACH_BYTES", "0"))
 
 # Only ingest document-type attachments — newsletters attach images. An
 # attachment qualifies if its email-declared MIME is in GMAIL_ATTACH_MIME OR its
