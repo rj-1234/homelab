@@ -23,7 +23,7 @@ spec:
           command: ["sh", "-c"]
           args:
             - pip install --target=/deps --no-cache-dir
-              'psycopg[binary]>=3.2' puremagic 'fastapi>=0.115' 'uvicorn[standard]>=0.32'
+              'psycopg[binary]>=3.2' puremagic 'pymupdf>=1.24'
           volumeMounts: [{ name: deps, mountPath: /deps }]
       containers:
         - name: worker

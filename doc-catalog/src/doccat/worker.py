@@ -5,7 +5,7 @@ add-on — if it breaks we lose responsiveness, not data.
 """
 import time
 
-from . import config, ingest
+from . import config, ingest, jobs
 
 
 def main() -> None:
@@ -15,9 +15,10 @@ def main() -> None:
     seen: dict = {}
     while True:
         try:
-            ingest.scan_once(seen)
+            ingest.scan_once(seen)   # ingest new uploads
+            jobs.drain()             # run pending pipeline jobs (text extraction)
         except Exception as e:  # noqa: BLE001 — never let the loop die
-            print(f"[worker] scan error: {e}")
+            print(f"[worker] loop error: {e}")
         time.sleep(config.SCAN_INTERVAL)
 
 

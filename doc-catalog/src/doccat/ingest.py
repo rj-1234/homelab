@@ -80,7 +80,7 @@ def ingest_one(path: Path) -> None:
                     doc_id = cur.fetchone()[0]
                     # 6. enqueue downstream work only for genuinely new content.
                     cur.execute(
-                        "INSERT INTO job(document_id,stage) VALUES(%s,'normalize')",
+                        "INSERT INTO job(document_id,stage) VALUES(%s,'text')",
                         (doc_id,),
                     )
         # 7. archive the processed original.
