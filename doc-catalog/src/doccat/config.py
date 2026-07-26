@@ -37,8 +37,10 @@ CLAUDE_VISION_MODEL = os.environ.get("CLAUDE_VISION_MODEL", "claude-opus-5")
 # Accounts are discovered from the files — no manual seeding.
 GMAIL_TOKENS_DIR = Path(os.environ.get("GMAIL_TOKENS_DIR", "/secrets/gmail"))
 GMAIL_POLL_INTERVAL = int(os.environ.get("GMAIL_POLL_INTERVAL", "300"))   # 5 min
-# First backfill is bounded so we don't pull an entire mailbox on account 1.
-GMAIL_INITIAL_QUERY = os.environ.get("GMAIL_INITIAL_QUERY", "has:attachment newer_than:1y")
+# Backfill recency bound. A `has:attachment (filename:...)` clause built from
+# GMAIL_ATTACH_EXT is appended automatically so the list returns only doc-bearing
+# messages — Gmail filters server-side and we fetch far fewer messages.
+GMAIL_INITIAL_QUERY = os.environ.get("GMAIL_INITIAL_QUERY", "newer_than:1y")
 # Skip small attachments (signature logos/icons). 0 disables the floor.
 GMAIL_MIN_ATTACH_BYTES = int(os.environ.get("GMAIL_MIN_ATTACH_BYTES", str(8 * 1024)))
 

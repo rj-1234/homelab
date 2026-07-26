@@ -89,6 +89,14 @@ def _passes(rules, sender):
     return not allows or any(p.lower() in s for p in allows)
 
 
+def _backfill_query():
+    """Recency bound + a server-side filename filter from the allowlist, so the
+    list returns only document-bearing messages instead of every attachment."""
+    fn = " OR ".join(f"filename:{e.lstrip('.')}" for e in config.GMAIL_ATTACH_EXT)
+    q = config.GMAIL_INITIAL_QUERY.strip()
+    return f"{q} has:attachment ({fn})" if fn else f"{q} has:attachment"
+
+
 def _message_ids(svc, history_id):
     """Return (message_ids, latest_history_id, did_backfill). Incremental via the
     History API when we have a cursor; full bounded backfill otherwise (or when
@@ -112,9 +120,10 @@ def _message_ids(svc, history_id):
             log.warn("gmail.history_expired", error=str(e))
 
     ids, page = set(), None
+    query = _backfill_query()
     while True:
         resp = svc.users().messages().list(
-            userId="me", q=config.GMAIL_INITIAL_QUERY, pageToken=page).execute()
+            userId="me", q=query, pageToken=page).execute()
         for m in resp.get("messages", []) or []:
             ids.add(m["id"])
         page = resp.get("nextPageToken")
