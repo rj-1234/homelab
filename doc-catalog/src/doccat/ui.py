@@ -12,7 +12,9 @@ import html
 STATUS = {
     "ingested":       ("New",       "s-new"),
     "text_extracted": ("Indexed",   "s-ok"),
+    "tagged":         ("Tagged",    "s-ok"),
     "needs_ocr":      ("Needs OCR", "s-warn"),
+    "ocr_failed":     ("OCR failed", "s-warn"),
     "no_text":        ("No text",   "s-muted"),
 }
 
@@ -132,6 +134,27 @@ details.page pre{margin:0;padding:.8rem;white-space:pre-wrap;font:400 .82rem/1.5
 .saved{color:var(--teal);font-family:'IBM Plex Mono';font-size:.8rem;opacity:0;transition:opacity .2s}
 .saved.show{opacity:1}
 
+/* tag picker — toggle chips from the taxonomy (no free-form typos) */
+.tagpick{display:flex;flex-direction:column;gap:.4rem;max-height:360px;overflow:auto}
+details.taggroup{border:1px solid var(--line);border-radius:7px;background:var(--card)}
+details.taggroup>summary{cursor:pointer;padding:.42rem .65rem;font:600 .8rem 'Space Grotesk';
+  color:var(--ink);list-style:none;display:flex;align-items:center;gap:.5rem;text-transform:capitalize}
+details.taggroup>summary::-webkit-details-marker{display:none}
+details.taggroup>summary::before{content:'\\25B8';color:var(--muted);font-size:.72rem;transition:transform .12s}
+details.taggroup[open]>summary::before{transform:rotate(90deg)}
+.tgcount{margin-left:auto;font:600 .64rem/1 'IBM Plex Mono';background:var(--teal);color:#fff;
+  border-radius:10px;padding:.2em .5em}
+.tgchips{display:flex;gap:.35rem;flex-wrap:wrap;padding:.1rem .65rem .6rem}
+.tagopt{font:500 .78rem 'IBM Plex Sans';color:var(--muted);background:var(--paper);
+  border:1px solid var(--line2);border-radius:20px;padding:.18em .7em;cursor:pointer;transition:.12s}
+.tagopt:hover{border-color:var(--teal);color:var(--ink)}
+.tagopt.on{background:var(--teal);color:#fff;border-color:var(--teal)}
+.tagextra{margin-top:.55rem}
+.titlerow{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap}
+.refresh{display:flex;align-items:center;gap:.42rem;font:500 .82rem 'IBM Plex Sans';color:var(--muted);
+  cursor:pointer;user-select:none;padding-top:.3rem}
+.refresh input{accent-color:var(--teal);width:15px;height:15px;cursor:pointer}
+
 /* add-document button + upload dialog */
 .add{font:600 .85rem 'Space Grotesk';background:var(--card);color:var(--ink);border:1px solid var(--line2);
   border-radius:8px;padding:.55rem .85rem;cursor:pointer;white-space:nowrap}
@@ -191,6 +214,19 @@ dialog.up::backdrop{background:rgba(10,12,8,.45);backdrop-filter:blur(2px)}
 .ruleadd select{font:400 .88rem 'IBM Plex Sans';color:var(--ink);background:var(--paper);
   border:1px solid var(--line2);border-radius:7px;padding:.45rem .5rem}
 .ruleadd .btn{padding:.45rem .9rem}
+.qgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.8rem;margin-top:.6rem}
+.qcard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.9rem 1rem;box-shadow:var(--shadow)}
+.qhead{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:.6rem}
+.qstage{font:600 .92rem 'Space Grotesk';text-transform:capitalize;letter-spacing:-.01em}
+.qtot{font:600 .78rem 'IBM Plex Mono';color:var(--muted)}
+.qstates{display:flex;gap:.4rem;flex-wrap:wrap}
+.qs{display:flex;align-items:center;gap:.4rem;font:500 .8rem 'IBM Plex Sans';
+  border:1px solid var(--line);border-radius:20px;padding:.16em .62em}
+.qs::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--line2);flex-shrink:0}
+.qs.ok::before{background:var(--teal)} .qs.warn::before{background:var(--stamp)}
+.qs.run::before{background:var(--blue)} .qs.idle::before{background:var(--muted)}
+.qn{font-family:'IBM Plex Mono';font-weight:600;color:var(--ink)}
+.ql{color:var(--muted);text-transform:capitalize}
 .qtable{width:100%;border-collapse:collapse;margin-top:.6rem;font-size:.88rem}
 .qtable th,.qtable td{text-align:left;padding:.45rem .6rem;border-bottom:1px solid var(--line)}
 .qtable th{font:500 .64rem/1 'IBM Plex Mono';letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}

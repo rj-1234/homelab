@@ -42,6 +42,10 @@ spec:
               valueFrom:
                 secretKeyRef: { name: doccat-anthropic, key: ANTHROPIC_API_KEY }
             - { name: DOCS_ROOT, value: /srv/docs }
+            # Ingest + fast pipeline. Embedding is drained by the separate
+            # embed-worker (60-embed-worker.yaml) so a slow doc never blocks these.
+            - { name: WORKER_STAGES, value: "text,ocr" }
+            - { name: WORKER_INGEST, value: "true" }
             # Paddle downloads recognition models under $HOME/.paddleocr — point
             # HOME at the dataset so the ~10MB models persist across restarts.
             - { name: HOME, value: /srv/docs/.paddle }

@@ -11,7 +11,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-from . import config, db, ui
+from . import classify, config, db, ui
 
 app = FastAPI(title="Document Catalog")
 
@@ -198,7 +198,35 @@ def detail(doc_id: int):
         f"<option value='{k}' {'selected' if d['status']==k else ''}>{v[0]}</option>"
         for k, v in ui.STATUS.items()
     )
-    tags_val = ", ".join(d["tags"] or [])
+    # tag picker: taxonomy tags as toggle chips (no typos); custom field for the rest
+    applied = set(d["tags"] or [])
+    tax = classify.taxonomy_tags()
+    known = {c for c, _ in tax} | {s for _, ss in tax for s in ss}
+    extra = [t for t in (d["tags"] or []) if t not in known]
+
+    def _chip(tag, label):
+        on = " on" if tag in applied else ""
+        return (f"<button type=button class='tagopt{on}' data-tag=\"{ui.esc(tag)}\">"
+                f"{ui.esc(label)}</button>")
+
+    groups_html = ""
+    for cat, subs in tax:
+        sel = [t for t in ([cat] + subs) if t in applied]
+        badge = f"<span class=tgcount>{len(sel)}</span>" if sel else ""
+        chips = _chip(cat, cat) + "".join(_chip(s, s.split(":", 1)[1]) for s in subs)
+        # categories that already carry tags open so they're visible/easy to fix;
+        # empty ones stay collapsed and out of the way.
+        groups_html += (
+            f"<details class=taggroup{' open' if sel else ''}>"
+            f"<summary>{ui.esc(cat)}{badge}</summary>"
+            f"<div class=tgchips>{chips}</div></details>")
+    tag_field = (
+        "<div class=field><label>Tags</label>"
+        f"<div class=tagpick id=f_tags>{groups_html}</div>"
+        "<input id=f_extra class=tagextra autocomplete=off "
+        "placeholder='+ custom tags, comma-separated' "
+        f"value=\"{ui.esc(', '.join(extra))}\"></div>"
+    )
 
     sheet = f"""
     <div class=wrap style="grid-template-columns:1fr">
@@ -219,6 +247,8 @@ def detail(doc_id: int):
             <a class='btn ghost' href='/doc/{d['id']}/raw' target=_blank>View original</a>
             <button class='btn ghost' onclick="reprocess({d['id']},'text')">Re-run text</button>
             <button class='btn ghost' onclick="reprocess({d['id']},'ocr')">Re-run OCR</button>
+            <button class='btn ghost' onclick="reprocess({d['id']},'embed')">Re-tag</button>
+            <button class='btn ghost' onclick="reprocess({d['id']},'embed_pages')" title="Embed each page for page-level semantic search">Embed pages</button>
             <button class='btn danger' onclick="del({d['id']})">Delete</button>
             <span class=saved id=act_msg></span>
           </div>
@@ -231,8 +261,7 @@ def detail(doc_id: int):
               <input id=f_type placeholder="e.g. tax · statement · medical" value="{ui.esc(d['doc_type'] or '')}"></div>
             <div class=field><label>Status</label>
               <select id=f_status>{opts}</select></div>
-            <div class=field><label>Tags (comma-separated)</label>
-              <input id=f_tags value="{ui.esc(tags_val)}"></div>
+            {tag_field}
             <div class=act><button class=btn onclick="save({d['id']})">Save changes</button>
               <span class=saved id=saved>Saved</span></div>
           </div>
@@ -246,10 +275,15 @@ def detail(doc_id: int):
       </main>
     </div>
     <script>
+    document.getElementById('f_tags').addEventListener('click',function(e){{
+      const b=e.target.closest('.tagopt'); if(b) b.classList.toggle('on');
+    }});
     async function save(id){{
+      const picked=[...document.querySelectorAll('#f_tags .tagopt.on')].map(b=>b.dataset.tag);
+      const extra=document.getElementById('f_extra').value.split(',').map(s=>s.trim()).filter(Boolean);
       const body={{title:f_title.value,doc_type:f_type.value||null,
         status:f_status.value,
-        tags:f_tags.value.split(',').map(s=>s.trim()).filter(Boolean)}};
+        tags:[...new Set([...picked,...extra])]}};
       const r=await fetch('/api/doc/'+id,{{method:'POST',
         headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}});
       const s=document.getElementById('saved');
@@ -296,13 +330,17 @@ async def update(doc_id: int, request: Request):
                 "UPDATE document SET title=%s, doc_type=%s, status=%s WHERE id=%s",
                 (p.get("title"), p.get("doc_type"), p.get("status"), doc_id),
             )
+            # Saving confirms the displayed tag set as user-owned: any auto tag
+            # the user kept becomes 'user' (a labelled example for the feedback
+            # loop); ones they removed are dropped.
             cur.execute("DELETE FROM document_tag WHERE document_id=%s", (doc_id,))
             for name in {t.strip() for t in p.get("tags", []) if t.strip()}:
                 cur.execute("INSERT INTO tag(name) VALUES(%s) ON CONFLICT (name) "
                             "DO UPDATE SET name=EXCLUDED.name RETURNING id", (name,))
                 tag_id = cur.fetchone()[0]
-                cur.execute("INSERT INTO document_tag(document_id,tag_id) VALUES(%s,%s)"
-                            " ON CONFLICT DO NOTHING", (doc_id, tag_id))
+                cur.execute("INSERT INTO document_tag(document_id,tag_id,source)"
+                            " VALUES(%s,%s,'user') ON CONFLICT (document_id,tag_id)"
+                            " DO UPDATE SET source='user'", (doc_id, tag_id))
     return {"ok": True}
 
 
@@ -311,8 +349,8 @@ async def reprocess(doc_id: int, request: Request):
     """Manually enqueue a pipeline stage for a document (retry text/OCR)."""
     p = await request.json()
     stage = p.get("stage", "text")
-    if stage not in ("text", "ocr"):
-        return JSONResponse({"error": "stage must be text|ocr"}, status_code=400)
+    if stage not in ("text", "ocr", "embed", "embed_pages"):
+        return JSONResponse({"error": "bad stage"}, status_code=400)
     with db.connect() as c:
         if not c.execute("SELECT 1 FROM document WHERE id=%s", (doc_id,)).fetchone():
             return JSONResponse({"error": "not found"}, status_code=404)
@@ -464,14 +502,24 @@ def status_page():
         "</div>")
 
     if d["jobs"]:
-        rows = "".join(
-            "<tr>"
-            f"<td class=mono>{ui.esc(j['stage'])}</td>"
-            f"<td><span class='dot {_JOB_DOT.get(j['state'],'idle')}'></span>{ui.esc(j['state'])}</td>"
-            f"<td class=num>{j['n']}</td></tr>"
-            for j in d["jobs"])
-        jobs_html = ("<table class=qtable><thead><tr><th>Stage</th><th>State</th>"
-                     "<th class=num>Count</th></tr></thead><tbody>" + rows + "</tbody></table>")
+        by_stage = {}
+        for j in d["jobs"]:
+            by_stage.setdefault(j["stage"], {})[j["state"]] = j["n"]
+        order = ["pending", "running", "done", "failed"]
+        cards = []
+        for stage in sorted(by_stage):
+            states = by_stage[stage]
+            total = sum(states.values())
+            pills = "".join(
+                f"<div class='qs {_JOB_DOT.get(st, 'idle')}'>"
+                f"<span class=qn>{states[st]}</span><span class=ql>{st}</span></div>"
+                for st in order if st in states)
+            cards.append(
+                f"<div class=qcard><div class=qhead>"
+                f"<span class=qstage>{ui.esc(stage)}</span>"
+                f"<span class=qtot>{total}</span></div>"
+                f"<div class=qstates>{pills}</div></div>")
+        jobs_html = "<div class=qgrid>" + "".join(cards) + "</div>"
     else:
         jobs_html = "<p class=count>No jobs yet.</p>"
 
@@ -492,13 +540,21 @@ def status_page():
 
     body = (
         "<div class=wrap style='grid-template-columns:1fr'><main>"
-        "<h1 class=title>Status</h1>"
-        "<span class=count>ingestion &amp; pipeline health</span>"
+        "<div class=titlerow><div><h1 class=title>Status</h1>"
+        "<span class=count>ingestion &amp; pipeline health</span></div>"
+        "<label class=refresh><input type=checkbox id=autoref>"
+        "<span>Auto-refresh</span></label></div>"
         f"{stats}"
-        "<div class=section><p class=eyebrow>Gmail accounts</p>" + acct_html + "</div>"
         "<div class=section><p class=eyebrow>Job queue</p>" + jobs_html + "</div>"
+        "<div class=section><p class=eyebrow>Gmail accounts</p>" + acct_html + "</div>"
         f"{fails_html}"
-        "</main></div>")
+        "</main></div>"
+        "<script>(function(){var cb=document.getElementById('autoref');if(!cb)return;"
+        "cb.checked=localStorage.getItem('doccat_autoref')==='1';var t=null;"
+        "function apply(){if(cb.checked)t=setTimeout(function(){location.reload();},8000);}"
+        "cb.addEventListener('change',function(){"
+        "localStorage.setItem('doccat_autoref',cb.checked?'1':'0');"
+        "if(t){clearTimeout(t);t=null;}apply();});apply();})();</script>")
     return ui.shell("Status", body)
 
 

@@ -2,28 +2,35 @@
 so multiple workers never grab the same job. Phase 2 handles the 'text' stage
 (Tier-0 text-layer extraction); unknown stages are marked done as no-ops.
 """
+import json
 import os
+import urllib.request
 
 from . import config, db, extract, log
 
 MAX_ATTEMPTS = 5
 
 
-def claim():
+def claim(stages=None):
     """Atomically take one *eligible* pending job and mark it running. Returns
-    (job_id, document_id, stage) or None. Eligibility enforces exponential
-    backoff between attempts: a job that just errored waits 2**attempts minutes
-    (2, 4, 8, 16) before it can be reclaimed. Fresh jobs (locked_at NULL) run
-    immediately. state='running' keeps other workers from re-claiming it."""
+    (job_id, document_id, stage) or None. When `stages` is given, only those
+    stages are claimed (lets a dedicated worker drain one stage). Eligibility
+    enforces exponential backoff between attempts: a job that just errored waits
+    2**attempts minutes (2, 4, 8, 16) before it can be reclaimed. Fresh jobs
+    (locked_at NULL) run immediately. state='running' keeps other workers from
+    re-claiming it."""
+    where = ("state='pending' AND (locked_at IS NULL OR "
+             "now() >= locked_at + (interval '1 minute' * power(2, attempts)))")
+    params = []
+    if stages:
+        where += " AND stage = ANY(%s)"
+        params.append(list(stages))
     conn = db.connect()
     with conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, document_id, stage FROM job WHERE state='pending' "
-                "AND (locked_at IS NULL OR "
-                "     now() >= locked_at + (interval '1 minute' * power(2, attempts))) "
-                "ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1"
-            )
+                "SELECT id, document_id, stage FROM job WHERE " + where +
+                " ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1", params)
             row = cur.fetchone()
             if not row:
                 return None
@@ -35,18 +42,20 @@ def claim():
     return row
 
 
-def reconcile():
+def reconcile(stages=None):
     """Requeue jobs that failed but haven't exhausted MAX_ATTEMPTS (e.g. failed
-    under an older lower cap, or manually re-run). They retry under the same
-    backoff. Idempotent; called once per worker loop. Prior error text is kept
-    for visibility until the retry succeeds or truly fails."""
+    under an older lower cap, or manually re-run). Scoped to `stages` when given
+    so each worker only reconciles its own. Idempotent; called once per loop.
+    Prior error text is kept until the retry succeeds or truly fails."""
+    sql = "UPDATE job SET state='pending' WHERE state='failed' AND attempts < %s"
+    params = [MAX_ATTEMPTS]
+    if stages:
+        sql += " AND stage = ANY(%s)"
+        params.append(list(stages))
     with db.connect() as c:
-        n = c.execute(
-            "UPDATE job SET state='pending' "
-            "WHERE state='failed' AND attempts < %s", (MAX_ATTEMPTS,)
-        ).rowcount
+        n = c.execute(sql, params).rowcount
     if n:
-        log.info("jobs.reconciled", requeued=n)
+        log.info("jobs.reconciled", requeued=n, stages=list(stages) if stages else "all")
     return n
 
 
@@ -79,6 +88,7 @@ def _run_text(cur, doc_id):
     has_text = any(t.strip() for _, t in pages)
     if has_text:
         status = "text_extracted"
+        cur.execute("INSERT INTO job(document_id,stage) VALUES(%s,'embed')", (doc_id,))
     elif mime == "application/pdf" or mime.startswith("image/"):
         status = "needs_ocr"           # scanned PDF / photo -> OCR stage
         cur.execute("INSERT INTO job(document_id,stage) VALUES(%s,'ocr')", (doc_id,))
@@ -118,12 +128,142 @@ def _run_ocr(cur, doc_id):
             "confidence=EXCLUDED.confidence",
             (doc_id, pno, text, engine, conf),
         )
+    if any_text:
+        cur.execute("INSERT INTO job(document_id,stage) VALUES(%s,'embed')", (doc_id,))
     status = "text_extracted" if any_text else "ocr_failed"
     cur.execute("UPDATE document SET status=%s WHERE id=%s", (status, doc_id))
     return status
 
 
-_STAGES = {"text": _run_text, "ocr": _run_ocr}
+# --- embed + semantic tagging ------------------------------------------------
+def _embed(texts, is_query=False):
+    """Call the embedder service; returns a list of L2-normalized vectors."""
+    body = json.dumps({"texts": texts, "is_query": is_query}).encode()
+    req = urllib.request.Request(
+        config.EMBEDDER_URL + "/embed", body, {"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=600) as r:
+        return json.load(r)["vectors"]
+
+
+_proto_state = {"protos": None, "confirmed": -1}
+
+
+def _prototypes():
+    """Category prototypes, in document (passage) space so they compare directly
+    to a doc vector. Base = the zero-shot description embedding; a category with
+    at least CLASSIFY_MIN_CENTROID user-confirmed documents is replaced by the
+    centroid of those documents' doc-level vectors. Rebuilt whenever the count of
+    confirmed tags changes (cheap invalidation) so corrections take effect."""
+    import numpy as np
+    from . import classify
+
+    with db.connect() as c:
+        confirmed = c.execute(
+            "SELECT count(*) FROM document_tag WHERE source='user'").fetchone()[0]
+    if _proto_state["protos"] is not None and _proto_state["confirmed"] == confirmed:
+        return _proto_state["protos"]
+
+    nd = classify.category_descriptions()
+    desc_vecs = _embed([d for _, d in nd])            # passage space (no instruct)
+    protos = {name: np.array(v) for (name, _), v in zip(nd, desc_vecs)}
+
+    with db.connect() as c:
+        for name in list(protos):
+            members = classify.category_members(name)
+            rows = c.execute(
+                "SELECT DISTINCT ch.document_id, ch.embedding::text FROM chunk ch"
+                " JOIN document_tag dt ON dt.document_id=ch.document_id"
+                " JOIN tag t ON t.id=dt.tag_id"
+                " WHERE ch.page_no IS NULL AND dt.source='user' AND t.name = ANY(%s)",
+                (members,)).fetchall()
+            if len(rows) >= config.CLASSIFY_MIN_CENTROID:
+                mat = np.array([json.loads(r[1]) for r in rows])
+                c_vec = mat.mean(axis=0)
+                norm = float(np.linalg.norm(c_vec))
+                if norm > 0:
+                    protos[name] = c_vec / norm     # L2-normalized centroid
+
+    _proto_state.update(protos=protos, confirmed=confirmed)
+    return protos
+
+
+def _pgvec(a):
+    return "[" + ",".join(f"{x:.6f}" for x in a) + "]"
+
+
+def _run_embed(cur, doc_id, pages=None):
+    """Embed the document, store vectors, and assign taxonomy tags. `pages`
+    overrides config.EMBED_PAGES for this run (the UI 'Embed pages' trigger)."""
+    import numpy as np
+    from . import classify
+
+    do_pages = config.EMBED_PAGES if pages is None else pages
+
+    pages = cur.execute(
+        "SELECT page_no, text FROM page WHERE document_id=%s ORDER BY page_no",
+        (doc_id,)).fetchall()
+    page_texts = [(pno, t or "") for pno, t in pages if (t or "").strip()]
+    doc_text = "\n\n".join(t for _, t in page_texts).strip()[:config.EMBED_MAX_CHARS]
+    if not doc_text:
+        cur.execute("UPDATE document SET status='no_text' WHERE id=%s", (doc_id,))
+        return "no_text"
+
+    row = cur.execute(
+        "SELECT string_agg(DISTINCT coalesce(se.sender,''),' ') FROM source_event se"
+        " JOIN document d ON d.primary_blob_sha=se.blob_sha WHERE d.id=%s",
+        (doc_id,)).fetchone()
+    sender = row[0] if row and row[0] else ""
+
+    # doc-level vector always (drives tagging); per-page chunks only when enabled
+    # (they're for future page-level search and are the slow part on CPU).
+    inputs = [doc_text]
+    if do_pages:
+        inputs += [t[:4000] for _, t in page_texts]
+    vecs = _embed(inputs)
+    doc_vec = np.array(vecs[0])
+
+    cur.execute("DELETE FROM chunk WHERE document_id=%s", (doc_id,))
+    cur.execute("INSERT INTO chunk(document_id,page_no,text,embedding)"
+                " VALUES(%s,NULL,%s,%s::vector)",
+                (doc_id, doc_text[:8000], _pgvec(doc_vec)))
+    if do_pages:
+        for (pno, t), v in zip(page_texts, vecs[1:]):
+            cur.execute("INSERT INTO chunk(document_id,page_no,text,embedding)"
+                        " VALUES(%s,%s,%s,%s::vector)",
+                        (doc_id, pno, t[:8000], _pgvec(np.array(v))))
+
+    protos = _prototypes()
+    tags = classify.classify(doc_vec, protos, doc_text, sender)
+
+    # refresh auto tags without clobbering user-confirmed ones
+    cur.execute("DELETE FROM document_tag WHERE document_id=%s AND source='auto'",
+                (doc_id,))
+    for name in sorted(tags):
+        cur.execute("INSERT INTO tag(name) VALUES(%s) ON CONFLICT (name) "
+                    "DO UPDATE SET name=EXCLUDED.name RETURNING id", (name,))
+        tid = cur.fetchone()[0]
+        cur.execute("INSERT INTO document_tag(document_id,tag_id,source) "
+                    "VALUES(%s,%s,'auto') ON CONFLICT (document_id,tag_id) "
+                    "DO NOTHING", (doc_id, tid))
+
+    scores = {n: round(float(np.dot(doc_vec, protos[n])), 4) for n in protos}
+    cur.execute(
+        "INSERT INTO extraction(document_id,schema_version,model,model_version,"
+        "params_hash,payload,confidence) VALUES(%s,'tags-v1',%s,'zeroshot',%s,%s,%s)",
+        (doc_id, config.EMBED_MODEL, str(config.CLASSIFY_THRESHOLD),
+         json.dumps({"tags": sorted(tags), "scores": scores}),
+         max(scores.values()) if scores else None))
+
+    cur.execute("UPDATE document SET status='tagged' WHERE id=%s", (doc_id,))
+    return "tagged:" + ",".join(sorted(tags))
+
+
+_STAGES = {
+    "text": _run_text,
+    "ocr": _run_ocr,
+    "embed": _run_embed,
+    "embed_pages": lambda cur, doc_id: _run_embed(cur, doc_id, pages=True),
+}
 
 
 def _process(job):
@@ -153,11 +293,12 @@ def _attempts(job_id):
         return c.execute("SELECT attempts FROM job WHERE id=%s", (job_id,)).fetchone()[0]
 
 
-def drain(max_batch=200):
-    """Process pending jobs until none remain (or batch cap). Returns count."""
+def drain(stages=None, max_batch=200):
+    """Process pending jobs (optionally only `stages`) until none remain or the
+    batch cap. Returns count."""
     n = 0
     while n < max_batch:
-        job = claim()
+        job = claim(stages)
         if not job:
             break
         _process(job)
