@@ -42,6 +42,8 @@ spec:
           volumeMounts:
             - { name: deps, mountPath: /deps }
             - { name: app, mountPath: /app, readOnly: true }
+            # Read-only blob store so /doc/{id}/raw can serve originals.
+            - { name: blobs, mountPath: /srv/docs/blobs, readOnly: true }
           resources:
             requests: { cpu: 25m, memory: 128Mi }
             limits: { memory: 256Mi }
@@ -49,6 +51,8 @@ spec:
         - { name: deps, emptyDir: {} }
         - name: app
           hostPath: { path: /home/cheeky/github/homelab/doc-catalog, type: Directory }
+        - name: blobs
+          hostPath: { path: /srv/docs/blobs, type: Directory }
 ---
 apiVersion: v1
 kind: Service

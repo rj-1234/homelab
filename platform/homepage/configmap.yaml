@@ -77,10 +77,10 @@ data:
             icon: filebrowser.png
             siteMonitor: http://10.43.200.31:8080
             statusStyle: dot
-        - Catalog:
+        - The Registry:
             href: https://cheeky-mini.tail2f4253.ts.net:8091
-            description: Document list · searchable
-            icon: mdi-file-search-outline
+            description: Browse · search · manage docs
+            icon: mdi-card-text-outline
             siteMonitor: http://10.43.200.30:8000/healthz
             statusStyle: dot
     - Infrastructure:
