@@ -5,20 +5,27 @@ add-on — if it breaks we lose responsiveness, not data.
 """
 import time
 
-from . import config, ingest, jobs
+from . import config, gmail, ingest, jobs, log
 
 
 def main() -> None:
     for d in (config.STAGING, config.PROCESSED, config.FAILED, config.BLOBS):
         d.mkdir(parents=True, exist_ok=True)
-    print(f"[worker] watching {config.INBOX} every {config.SCAN_INTERVAL}s")
+    log.info("worker.start", inbox=str(config.INBOX),
+             scan_interval=config.SCAN_INTERVAL,
+             gmail_interval=config.GMAIL_POLL_INTERVAL)
     seen: dict = {}
+    last_gmail = 0.0
     while True:
         try:
             ingest.scan_once(seen)   # ingest new uploads
             jobs.drain()             # run pending pipeline jobs (text extraction)
+            now = time.monotonic()
+            if now - last_gmail >= config.GMAIL_POLL_INTERVAL:
+                gmail.poll()         # pull Gmail attachments into the inbox pipeline
+                last_gmail = now
         except Exception as e:  # noqa: BLE001 — never let the loop die
-            print(f"[worker] loop error: {e}")
+            log.error("worker.loop_error", error=str(e))
         time.sleep(config.SCAN_INTERVAL)
 
 

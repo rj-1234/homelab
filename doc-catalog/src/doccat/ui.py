@@ -151,6 +151,43 @@ dialog.up::backdrop{background:rgba(10,12,8,.45);backdrop-filter:blur(2px)}
 .uplist li span{color:var(--muted);white-space:nowrap}
 .upact{display:flex;gap:.6rem;justify-content:flex-end;margin-top:1.1rem}
 .upnote{font:400 .74rem/1.45 'IBM Plex Sans';color:var(--muted);margin:.9rem 0 0}
+
+/* status page */
+.navlink{font:600 .85rem 'Space Grotesk';color:var(--muted);white-space:nowrap}
+.navlink:hover{color:var(--teal)}
+.statgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.8rem;margin-top:.6rem}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.9rem 1rem;box-shadow:var(--shadow)}
+.stat .k{font:500 .64rem/1 'IBM Plex Mono';letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.stat .v{font-family:'Space Grotesk';font-weight:700;font-size:1.55rem;margin-top:.35rem;letter-spacing:-.02em}
+.stat .sub{font:400 .75rem 'IBM Plex Mono';color:var(--muted);margin-top:.15rem}
+.acct{background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:.85rem 1rem;box-shadow:var(--shadow);margin-top:.6rem}
+.acctrow{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap}
+.acct .em{font-family:'Space Grotesk';font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.acct .m{font:400 .78rem 'IBM Plex Mono';color:var(--muted)}
+.rules{border-top:1px solid var(--line);margin-top:.8rem;padding-top:.7rem}
+.rulelist{display:flex;gap:.4rem;flex-wrap:wrap;margin:.1rem 0 .7rem}
+.rule{display:inline-flex;align-items:center;gap:.4rem;font:500 .78rem 'IBM Plex Mono';
+  border:1px solid var(--line2);border-radius:20px;padding:.15em .3em .15em .7em}
+.rule.allow{color:var(--teal);border-color:color-mix(in srgb,var(--teal) 45%,var(--line))}
+.rule.deny{color:var(--stamp);border-color:color-mix(in srgb,var(--stamp) 45%,var(--line))}
+.rule .ra{font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;opacity:.7}
+.rule .rx{background:none;border:none;color:inherit;cursor:pointer;font-size:1rem;line-height:1;opacity:.6;padding:0 .1em}
+.rule .rx:hover{opacity:1}
+.ruleadd{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+.ruleadd input{flex:1;min-width:180px;font:400 .88rem 'IBM Plex Sans';color:var(--ink);background:var(--paper);
+  border:1px solid var(--line2);border-radius:7px;padding:.45rem .6rem;outline:none}
+.ruleadd input:focus{border-color:var(--teal);box-shadow:0 0 0 3px color-mix(in srgb,var(--teal) 16%,transparent)}
+.ruleadd select{font:400 .88rem 'IBM Plex Sans';color:var(--ink);background:var(--paper);
+  border:1px solid var(--line2);border-radius:7px;padding:.45rem .5rem}
+.ruleadd .btn{padding:.45rem .9rem}
+.qtable{width:100%;border-collapse:collapse;margin-top:.6rem;font-size:.88rem}
+.qtable th,.qtable td{text-align:left;padding:.45rem .6rem;border-bottom:1px solid var(--line)}
+.qtable th{font:500 .64rem/1 'IBM Plex Mono';letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.qtable td.num{font-family:'IBM Plex Mono';text-align:right}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:.45rem;vertical-align:middle}
+.dot.ok{background:var(--teal)} .dot.warn{background:var(--stamp)}
+.dot.run{background:var(--blue)} .dot.idle{background:var(--line2)}
 """
 
 # Injected once per page by shell(); the <dialog> the "+ Add document" button opens.
@@ -227,6 +264,7 @@ def shell(title, body, q=""):
         f"<form class=search method=get action=/>"
         f"<input name=q placeholder='Search the catalog…' value=\"{esc(q)}\" autocomplete=off>"
         "<button>Search</button></form>"
+        "<a class=navlink href=/status>Status</a>"
         "<button class=add type=button onclick=\"document.getElementById('up').showModal()\">"
         "+ Add document</button>"
         "</div></header>"

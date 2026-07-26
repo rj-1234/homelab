@@ -27,6 +27,7 @@ spec:
             - pip install --target=/deps --no-cache-dir
               'psycopg[binary]>=3.2' puremagic 'pymupdf>=1.24'
               'paddleocr>=2.9,<3' anthropic pillow-heif
+              google-api-python-client google-auth
           volumeMounts: [{ name: deps, mountPath: /deps }]
       containers:
         - name: worker
@@ -51,6 +52,9 @@ spec:
             - { name: deps, mountPath: /deps }
             - { name: app, mountPath: /app, readOnly: true }
             - { name: docs, mountPath: /srv/docs }
+            # Gmail token files (one per account), mounted read-only. Optional:
+            # if the secret is absent the deploy still runs (gmail.poll no-ops).
+            - { name: gmail, mountPath: /secrets/gmail, readOnly: true }
           resources:
             requests: { cpu: 250m, memory: 512Mi }
             limits: { memory: 3Gi }   # Paddle + models are memory-hungry
@@ -60,3 +64,7 @@ spec:
           hostPath: { path: /home/cheeky/github/homelab/doc-catalog, type: Directory }
         - name: docs
           hostPath: { path: /srv/docs, type: Directory }
+        - name: gmail
+          secret:
+            secretName: doccat-gmail
+            optional: true   # deploy works before the secret is created

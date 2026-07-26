@@ -4,7 +4,7 @@ so multiple workers never grab the same job. Phase 2 handles the 'text' stage
 """
 import os
 
-from . import config, db, extract
+from . import config, db, extract, log
 
 MAX_ATTEMPTS = 3
 
@@ -81,14 +81,14 @@ def _run_ocr(cur, doc_id):
             text, conf = ocr.paddle_png(png)
         except Exception as e:  # noqa: BLE001 — a bad page shouldn't kill the doc
             text = ""
-            print(f"[ocr] paddle failed doc={doc_id} p{pno}: {e}")
+            log.warn("ocr.paddle_failed", doc=doc_id, page=pno, error=str(e))
         if have_key and (conf < config.OCR_CONF_THRESHOLD or not text.strip()):
             try:
                 escalated = ocr.claude_png(png)
                 if escalated.strip():
                     text, engine, conf = escalated, "claude-vision", 1.0
             except Exception as e:  # noqa: BLE001
-                print(f"[ocr] claude failed doc={doc_id} p{pno}: {e}")
+                log.warn("ocr.claude_failed", doc=doc_id, page=pno, error=str(e))
         if text.strip():
             any_text = True
         cur.execute(
@@ -117,7 +117,7 @@ def _process(job):
                 cur.execute(
                     "UPDATE job SET state='done', error=NULL WHERE id=%s", (job_id,)
                 )
-        print(f"[job] {job_id} done stage={stage} doc={doc_id} -> {info}")
+        log.info("job.done", job=job_id, stage=stage, doc=doc_id, result=info)
     except Exception as e:  # noqa: BLE001 — isolate a bad doc, keep draining
         with db.connect() as c:
             c.execute(
@@ -125,7 +125,7 @@ def _process(job):
                 ("pending" if _attempts(job_id) < MAX_ATTEMPTS else "failed",
                  str(e), job_id),
             )
-        print(f"[job] {job_id} error stage={stage}: {e}")
+        log.error("job.error", job=job_id, stage=stage, error=str(e))
 
 
 def _attempts(job_id):

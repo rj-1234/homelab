@@ -16,6 +16,8 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "python-multipart>=0.0.9",  # FastAPI multipart form parsing for uploads
+    "google-api-python-client>=2.140",  # Gmail API (attachment ingestion)
+    "google-auth>=2.34",                # refresh-token -> access-token
 ]
 
 [project.scripts]

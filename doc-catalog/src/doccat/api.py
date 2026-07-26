@@ -272,6 +272,168 @@ async def update(doc_id: int, request: Request):
     return {"ok": True}
 
 
+# --- status ------------------------------------------------------------------
+def _status_data():
+    accounts = _rows(
+        "SELECT a.id, a.email, a.status, a.last_full_sync_at,"
+        " (a.history_id IS NOT NULL) AS synced,"
+        " (SELECT count(*) FROM source_event se WHERE se.source='gmail'"
+        "   AND se.source_ref LIKE 'gmail:' || a.id || ':%%') AS attachments"
+        " FROM account a WHERE a.provider='gmail' ORDER BY a.email")
+    jobs = _rows("SELECT stage, state, count(*) AS n FROM job"
+                 " GROUP BY stage, state ORDER BY stage, state")
+    sources = _rows("SELECT source, count(*) AS n FROM source_event"
+                    " GROUP BY source ORDER BY n DESC")
+    failures = _rows(
+        "SELECT j.id, j.stage, j.attempts, left(j.error, 200) AS error, d.title"
+        " FROM job j JOIN document d ON d.id=j.document_id"
+        " WHERE j.state='failed' ORDER BY j.id DESC LIMIT 10")
+    docs = _one("SELECT count(*) AS n FROM document"
+                " WHERE canonical_document_id IS NULL")
+    return {"accounts": accounts, "jobs": jobs, "sources": sources,
+            "failures": failures, "documents": docs["n"] if docs else 0}
+
+
+@app.get("/api/status")
+def api_status():
+    return _status_data()
+
+
+_JOB_DOT = {"done": "ok", "failed": "warn", "running": "run", "pending": "idle"}
+
+_RULE_JS = """
+<script>
+async function _rule(path, body){
+  const r = await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)});
+  if(r.ok){location.reload();} else {alert('Rule update failed');}
+}
+function addRule(id){
+  const p=document.getElementById('rp'+id).value.trim(); if(!p) return;
+  _rule('/api/sender-rule',{account_id:id,pattern:p,
+    action:document.getElementById('rq'+id).value});
+}
+function delRule(id,pattern,action){
+  _rule('/api/sender-rule/delete',{account_id:id,pattern:pattern,action:action});
+}
+</script>
+"""
+
+
+@app.get("/status", response_class=HTMLResponse)
+def status_page():
+    d = _status_data()
+
+    if d["accounts"]:
+        cards = []
+        for a in d["accounts"]:
+            rules = _rows("SELECT pattern, action FROM sender_rule WHERE account_id=%s"
+                          " ORDER BY action, pattern", (a["id"],))
+            chips = "".join(
+                f"<span class='rule {r['action']}'>{ui.esc(r['pattern'])}"
+                f"<span class=ra>{r['action']}</span>"
+                f"<button class=rx title=remove onclick=\"delRule({a['id']},"
+                f"'{ui.esc(r['pattern'])}','{r['action']}')\">×</button></span>"
+                for r in rules) or "<span class=m>no rules — all senders ingested</span>"
+            synced = ("synced " + a["last_full_sync_at"].strftime("%Y-%m-%d %H:%M")
+                      if a["last_full_sync_at"] else "never synced")
+            cards.append(
+                "<div class=acct>"
+                "<div class=acctrow>"
+                f"<span class=em>{ui.esc(a['email'])}</span>"
+                f"<span class=m>{a['attachments']} attachments</span>"
+                f"<span class=m>{synced}</span>"
+                f"<span class='chip {'s-ok' if a['synced'] else 's-muted'}'>"
+                f"{'active' if a['status']=='active' else ui.esc(a['status'])}</span>"
+                "</div>"
+                "<div class=rules><p class=eyebrow>Sender rules</p>"
+                f"<div class=rulelist>{chips}</div>"
+                "<div class=ruleadd>"
+                f"<input id=rp{a['id']} placeholder='sender contains… e.g. chase.com'>"
+                f"<select id=rq{a['id']}><option value=allow>allow</option>"
+                "<option value=deny>deny</option></select>"
+                f"<button class=btn onclick='addRule({a['id']})'>Add</button></div>"
+                "<p class=upnote>No rules ingest every sender. Any <b>allow</b> rule "
+                "means only matching senders are ingested; a <b>deny</b> always "
+                "excludes. Matching is case-insensitive substring on the From header."
+                "</p></div></div>")
+        acct_html = "".join(cards) + _RULE_JS
+    else:
+        acct_html = ("<div class=empty><b>No Gmail accounts connected</b>"
+                     "Mount a token secret (doccat-gmail) and the worker registers "
+                     "accounts on its next poll.</div>")
+
+    src = {s["source"]: s["n"] for s in d["sources"]}
+    stats = (
+        "<div class=statgrid>"
+        f"<div class=stat><div class=k>Documents</div><div class=v>{d['documents']}</div></div>"
+        f"<div class=stat><div class=k>From upload</div><div class=v>{src.get('upload',0)}</div>"
+        "<div class=sub>source events</div></div>"
+        f"<div class=stat><div class=k>From gmail</div><div class=v>{src.get('gmail',0)}</div>"
+        "<div class=sub>source events</div></div>"
+        "</div>")
+
+    if d["jobs"]:
+        rows = "".join(
+            "<tr>"
+            f"<td class=mono>{ui.esc(j['stage'])}</td>"
+            f"<td><span class='dot {_JOB_DOT.get(j['state'],'idle')}'></span>{ui.esc(j['state'])}</td>"
+            f"<td class=num>{j['n']}</td></tr>"
+            for j in d["jobs"])
+        jobs_html = ("<table class=qtable><thead><tr><th>Stage</th><th>State</th>"
+                     "<th class=num>Count</th></tr></thead><tbody>" + rows + "</tbody></table>")
+    else:
+        jobs_html = "<p class=count>No jobs yet.</p>"
+
+    if d["failures"]:
+        frows = "".join(
+            "<tr>"
+            f"<td class=mono>#{f['id']}</td>"
+            f"<td class=mono>{ui.esc(f['stage'])}</td>"
+            f"<td>{ui.esc(f['title'])}</td>"
+            f"<td class=mono>{ui.esc(f['error'])}</td></tr>"
+            for f in d["failures"])
+        fails_html = ("<div class=section><p class=eyebrow>Recent failures</p>"
+                      "<table class=qtable><thead><tr><th>Job</th><th>Stage</th>"
+                      "<th>Document</th><th>Error</th></tr></thead><tbody>"
+                      + frows + "</tbody></table></div>")
+    else:
+        fails_html = ""
+
+    body = (
+        "<div class=wrap style='grid-template-columns:1fr'><main>"
+        "<h1 class=title>Status</h1>"
+        "<span class=count>ingestion &amp; pipeline health</span>"
+        f"{stats}"
+        "<div class=section><p class=eyebrow>Gmail accounts</p>" + acct_html + "</div>"
+        "<div class=section><p class=eyebrow>Job queue</p>" + jobs_html + "</div>"
+        f"{fails_html}"
+        "</main></div>")
+    return ui.shell("Status", body)
+
+
+@app.post("/api/sender-rule")
+async def add_sender_rule(request: Request):
+    p = await request.json()
+    pattern = (p.get("pattern") or "").strip()
+    action = p.get("action", "allow")
+    if not pattern or action not in ("allow", "deny"):
+        return JSONResponse({"error": "pattern and allow|deny required"}, status_code=400)
+    with db.connect() as c:
+        c.execute("INSERT INTO sender_rule(account_id,pattern,action) VALUES(%s,%s,%s)",
+                  (p["account_id"], pattern, action))
+    return {"ok": True}
+
+
+@app.post("/api/sender-rule/delete")
+async def del_sender_rule(request: Request):
+    p = await request.json()
+    with db.connect() as c:
+        c.execute("DELETE FROM sender_rule WHERE account_id=%s AND pattern=%s AND action=%s",
+                  (p["account_id"], p.get("pattern"), p.get("action")))
+    return {"ok": True}
+
+
 # --- upload ------------------------------------------------------------------
 _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
