@@ -23,3 +23,10 @@ SCAN_INTERVAL = int(os.environ.get("SCAN_INTERVAL", "30"))
 # Quiescence guard: only claim a file once size+mtime are stable across two
 # scans AND mtime is at least this old (avoids hashing partial uploads).
 QUIESCENCE_AGE = int(os.environ.get("QUIESCENCE_AGE", "10"))
+
+# --- OCR (Phase 4) ----------------------------------------------------------
+# PaddleOCR runs locally (CPU). Pages whose mean recognition confidence falls
+# below the threshold escalate to Claude vision (if ANTHROPIC_API_KEY is set).
+OCR_DPI = int(os.environ.get("OCR_DPI", "220"))          # pdf page raster DPI
+OCR_CONF_THRESHOLD = float(os.environ.get("OCR_CONF_THRESHOLD", "0.6"))
+CLAUDE_VISION_MODEL = os.environ.get("CLAUDE_VISION_MODEL", "claude-opus-5")

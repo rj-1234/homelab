@@ -1,7 +1,8 @@
 ---
-# Ingest worker. No custom image: stock python:3.12-slim, deps pip-installed into
-# an emptyDir by an initContainer, app source hostPath-mounted from the repo.
-# Pinned to cheeky-mini (repo + /srv/docs dataset live here).
+# Ingest + pipeline worker. No custom build: uses Baidu's paddlepaddle image
+# (ships Paddle + the CV system libs OpenCV needs), with our extra deps
+# pip-installed into an emptyDir by an initContainer and the app source
+# hostPath-mounted. Pinned to cheeky-mini (repo + /srv/docs dataset live here).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -19,31 +20,40 @@ spec:
       securityContext: { runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000 }
       initContainers:
         - name: deps
-          image: python:3.12-slim
+          image: paddlepaddle/paddle:2.6.2
           command: ["sh", "-c"]
           args:
+            # paddlepaddle itself is already in the image; add the rest.
             - pip install --target=/deps --no-cache-dir
               'psycopg[binary]>=3.2' puremagic 'pymupdf>=1.24'
+              'paddleocr>=2.9,<3' anthropic pillow-heif
           volumeMounts: [{ name: deps, mountPath: /deps }]
       containers:
         - name: worker
-          image: python:3.12-slim
+          image: paddlepaddle/paddle:2.6.2
           command: ["python", "-m", "doccat.worker"]
           envFrom:
             - secretRef: { name: doccat-postgres }
           env:
             - name: DATABASE_URL
               value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)"
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef: { name: doccat-anthropic, key: ANTHROPIC_API_KEY }
             - { name: DOCS_ROOT, value: /srv/docs }
-            - { name: PYTHONPATH, value: /deps:/app/src }
+            # Paddle downloads recognition models under $HOME/.paddleocr — point
+            # HOME at the dataset so the ~10MB models persist across restarts.
+            - { name: HOME, value: /srv/docs/.paddle }
+            # Image ships Paddle in site-packages; /deps adds our libs on top.
+            - { name: PYTHONPATH, value: "/deps:/app/src" }
             - { name: PYTHONUNBUFFERED, value: "1" }
           volumeMounts:
             - { name: deps, mountPath: /deps }
             - { name: app, mountPath: /app, readOnly: true }
             - { name: docs, mountPath: /srv/docs }
           resources:
-            requests: { cpu: 25m, memory: 128Mi }
-            limits: { memory: 512Mi }
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { memory: 3Gi }   # Paddle + models are memory-hungry
       volumes:
         - { name: deps, emptyDir: {} }
         - name: app

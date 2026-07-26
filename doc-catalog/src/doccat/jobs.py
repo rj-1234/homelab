@@ -2,7 +2,9 @@
 so multiple workers never grab the same job. Phase 2 handles the 'text' stage
 (Tier-0 text-layer extraction); unknown stages are marked done as no-ops.
 """
-from . import db, extract
+import os
+
+from . import config, db, extract
 
 MAX_ATTEMPTS = 3
 
@@ -58,15 +60,50 @@ def _run_text(cur, doc_id):
     has_text = any(t.strip() for _, t in pages)
     if has_text:
         status = "text_extracted"
-    elif mime == "application/pdf":
-        status = "needs_ocr"           # scanned PDF -> Phase 4 OCR
+    elif mime == "application/pdf" or mime.startswith("image/"):
+        status = "needs_ocr"           # scanned PDF / photo -> OCR stage
+        cur.execute("INSERT INTO job(document_id,stage) VALUES(%s,'ocr')", (doc_id,))
     else:
         status = "no_text"
     cur.execute("UPDATE document SET status=%s WHERE id=%s", (status, doc_id))
     return status
 
 
-_STAGES = {"text": _run_text}
+def _run_ocr(cur, doc_id):
+    """PaddleOCR each page; escalate low-confidence pages to Claude vision."""
+    from . import ocr
+    mime, path = _blob_for(cur, doc_id)
+    have_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    any_text = False
+    for pno, png in ocr.pages_for(path, mime):
+        engine, conf = "paddleocr", 0.0
+        try:
+            text, conf = ocr.paddle_png(png)
+        except Exception as e:  # noqa: BLE001 — a bad page shouldn't kill the doc
+            text = ""
+            print(f"[ocr] paddle failed doc={doc_id} p{pno}: {e}")
+        if have_key and (conf < config.OCR_CONF_THRESHOLD or not text.strip()):
+            try:
+                escalated = ocr.claude_png(png)
+                if escalated.strip():
+                    text, engine, conf = escalated, "claude-vision", 1.0
+            except Exception as e:  # noqa: BLE001
+                print(f"[ocr] claude failed doc={doc_id} p{pno}: {e}")
+        if text.strip():
+            any_text = True
+        cur.execute(
+            "INSERT INTO page(document_id,page_no,text,engine,confidence) "
+            "VALUES(%s,%s,%s,%s,%s) ON CONFLICT (document_id,page_no) "
+            "DO UPDATE SET text=EXCLUDED.text, engine=EXCLUDED.engine, "
+            "confidence=EXCLUDED.confidence",
+            (doc_id, pno, text, engine, conf),
+        )
+    status = "text_extracted" if any_text else "ocr_failed"
+    cur.execute("UPDATE document SET status=%s WHERE id=%s", (status, doc_id))
+    return status
+
+
+_STAGES = {"text": _run_text, "ocr": _run_ocr}
 
 
 def _process(job):
