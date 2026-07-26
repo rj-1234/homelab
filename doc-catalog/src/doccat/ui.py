@@ -314,8 +314,23 @@ def shell(title, body, q=""):
         "<button class=add type=button onclick=\"document.getElementById('up').showModal()\">"
         "+ Add document</button>"
         "</div></header>"
-        f"{body}{_UPLOAD}</body></html>"
+        f"{body}{_UPLOAD}{_AUTOREFRESH}</body></html>"
     )
+
+
+# Global auto-refresh: any page that renders an #autoref checkbox opts in. Detail
+# pages omit it so editing is never interrupted. Off by default; persisted.
+_AUTOREFRESH = """
+<script>(function(){
+  var cb=document.getElementById('autoref'); if(!cb) return;
+  cb.checked=localStorage.getItem('doccat_autoref')==='1'; var t=null;
+  function apply(){ if(cb.checked) t=setTimeout(function(){location.reload();},8000); }
+  cb.addEventListener('change',function(){
+    localStorage.setItem('doccat_autoref',cb.checked?'1':'0');
+    if(t){clearTimeout(t);t=null;} apply();});
+  apply();
+})();</script>
+"""
 
 
 def hl(snippet):

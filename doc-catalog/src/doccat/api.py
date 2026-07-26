@@ -140,8 +140,11 @@ def index(q: str = "", status: str = "", tag: str = ""):
     body = (
         "<div class=wrap>"
         + _rail(status, tag)
-        + f"<main><h1 class=title>{heading}</h1>"
-        + f"<span class=count>{len(docs)} document{'s' if len(docs)!=1 else ''}</span>"
+        + "<main><div class=titlerow><div>"
+        + f"<h1 class=title>{heading}</h1>"
+        + f"<span class=count>{len(docs)} document{'s' if len(docs)!=1 else ''}</span></div>"
+        + "<label class=refresh><input type=checkbox id=autoref>"
+          "<span>Auto-refresh</span></label></div>"
         + cards + "</main></div>"
     )
     return ui.shell(heading, body, q)
@@ -548,13 +551,7 @@ def status_page():
         "<div class=section><p class=eyebrow>Job queue</p>" + jobs_html + "</div>"
         "<div class=section><p class=eyebrow>Gmail accounts</p>" + acct_html + "</div>"
         f"{fails_html}"
-        "</main></div>"
-        "<script>(function(){var cb=document.getElementById('autoref');if(!cb)return;"
-        "cb.checked=localStorage.getItem('doccat_autoref')==='1';var t=null;"
-        "function apply(){if(cb.checked)t=setTimeout(function(){location.reload();},8000);}"
-        "cb.addEventListener('change',function(){"
-        "localStorage.setItem('doccat_autoref',cb.checked?'1':'0');"
-        "if(t){clearTimeout(t);t=null;}apply();});apply();})();</script>")
+        "</main></div>")
     return ui.shell("Status", body)
 
 
