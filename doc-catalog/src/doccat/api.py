@@ -143,8 +143,7 @@ def index(q: str = "", status: str = "", tag: str = ""):
         + "<main><div class=titlerow><div>"
         + f"<h1 class=title>{heading}</h1>"
         + f"<span class=count>{len(docs)} document{'s' if len(docs)!=1 else ''}</span></div>"
-        + "<label class=refresh><input type=checkbox id=autoref>"
-          "<span>Auto-refresh</span></label></div>"
+        + ui.autoref() + "</div>"
         + cards + "</main></div>"
     )
     return ui.shell(heading, body, q)
@@ -201,7 +200,26 @@ def detail(doc_id: int):
         f"<option value='{k}' {'selected' if d['status']==k else ''}>{v[0]}</option>"
         for k, v in ui.STATUS.items()
     )
-    # tag picker: taxonomy tags as toggle chips (no typos); custom field for the rest
+
+    # --- pipeline stage strip: which stage each doc is at, or Done ------------
+    jobs_for = _rows("SELECT stage, state FROM job WHERE document_id=%s", (doc_id,))
+    active = {j["stage"] for j in jobs_for if j["state"] in ("pending", "running")}
+    ocr_pages = any((p["engine"] or "") in ("paddleocr", "claude-vision") for p in pages)
+
+    def _pstate(stage, done):
+        return "active" if stage in active else ("done" if done else "todo")
+
+    text_done = bool(pages) or d["status"] in ("text_extracted", "tagged", "no_text", "ocr_failed")
+    ocr_applies = ("ocr" in active) or ocr_pages or d["status"] in ("needs_ocr", "ocr_failed")
+    all_done = d["status"] == "tagged" and not active
+    pchips = [f"<span class='pstage {_pstate('text', text_done)}'>text</span>"]
+    if ocr_applies:
+        pchips.append(f"<span class='pstage {_pstate('ocr', ocr_pages)}'>ocr</span>")
+    pchips.append(f"<span class='pstage {_pstate('embed', d['status']=='tagged')}'>embed</span>")
+    pipeline = ("<div class=pipeline>" + "".join(pchips)
+                + ("<span class=pdone>✓ Done</span>" if all_done else "") + "</div>")
+
+    # --- tags ----------------------------------------------------------------
     applied = set(d["tags"] or [])
     tax = classify.taxonomy_tags()
     known = {c for c, _ in tax} | {s for _, ss in tax for s in ss}
@@ -212,34 +230,35 @@ def detail(doc_id: int):
         return (f"<button type=button class='tagopt{on}' data-tag=\"{ui.esc(tag)}\">"
                 f"{ui.esc(label)}</button>")
 
-    groups_html = ""
+    # current tags: grouped by category, sub-tags indented, only the ones present
+    cur = []
     for cat, subs in tax:
-        sel = [t for t in ([cat] + subs) if t in applied]
-        badge = f"<span class=tgcount>{len(sel)}</span>" if sel else ""
-        chips = _chip(cat, cat) + "".join(_chip(s, s.split(":", 1)[1]) for s in subs)
-        # categories that already carry tags open so they're visible/easy to fix;
-        # empty ones stay collapsed and out of the way.
-        groups_html += (
-            f"<details class=taggroup{' open' if sel else ''}>"
-            f"<summary>{ui.esc(cat)}{badge}</summary>"
-            f"<div class=tgchips>{chips}</div></details>")
-    tag_field = (
-        "<div class=field><label>Tags</label>"
-        f"<div class=tagpick id=f_tags>{groups_html}</div>"
-        "<input id=f_extra class=tagextra autocomplete=off "
-        "placeholder='+ custom tags, comma-separated' "
-        f"value=\"{ui.esc(', '.join(extra))}\"></div>"
-    )
+        present = [s for s in subs if s in applied]
+        if cat not in applied and not present:
+            continue
+        cur.append(
+            f"<div class=ctgroup><span class=ctcat>{ui.esc(cat)}</span>"
+            + "".join(f"<span class=ctsub>{ui.esc(s.split(':', 1)[1])}</span>" for s in present)
+            + "</div>")
+    if extra:
+        cur.append("<div class=ctgroup>"
+                   + "".join(f"<span class=ctsub>{ui.esc(t)}</span>" for t in extra) + "</div>")
+    current_html = "".join(cur) or "<div class=ctempty>No tags yet</div>"
+
+    # editable picker: every category, sub-tags indented under it, applied highlit
+    pick_html = "".join(
+        f"<div class=pgroup><div class=pgcat>{_chip(cat, cat)}</div>"
+        f"<div class=pgsubs>" + "".join(_chip(s, s.split(':', 1)[1]) for s in subs)
+        + "</div></div>"
+        for cat, subs in tax)
 
     sheet = f"""
-    <div class=wrap style="grid-template-columns:1fr">
+    <div class="wrap detailwrap">
       <main>
         <a class=back href=/>← Catalog</a>
         <div class=sheet>
-          <div class=row1 style="display:flex;align-items:baseline;gap:.7rem">
-            <h1 style="flex:1">{ui.esc(d['title'])}</h1>
-            <span class='chip {cls}'>{ui.esc(label)}</span>
-          </div>
+          <h1 style="margin:.2rem 0 .4rem">{ui.esc(d['title'])}</h1>
+          {pipeline}
           <div class=meta><span class=mono>#{d['id']}</span>
             <span class=mono>{ui.esc(d['sha'][:24])}…</span>
             <span>{ui.esc(d['mime'])}</span>
@@ -264,9 +283,6 @@ def detail(doc_id: int):
               <input id=f_type placeholder="e.g. tax · statement · medical" value="{ui.esc(d['doc_type'] or '')}"></div>
             <div class=field><label>Status</label>
               <select id=f_status>{opts}</select></div>
-            {tag_field}
-            <div class=act><button class=btn onclick="save({d['id']})">Save changes</button>
-              <span class=saved id=saved>Saved</span></div>
           </div>
 
           <div class=section><p class=eyebrow>Provenance</p>
@@ -276,6 +292,19 @@ def detail(doc_id: int):
             {pages_html}</div>
         </div>
       </main>
+      <aside class=tagaside>
+        <p class=eyebrow>Tags</p>
+        <div class=curtags>{current_html}</div>
+        <div class=tagedit>
+          <p class=eyebrow>Add or change</p>
+          <div class=tagpick id=f_tags>{pick_html}</div>
+          <input id=f_extra class=tagextra autocomplete=off
+            placeholder="+ custom, comma-separated" value="{ui.esc(', '.join(extra))}">
+          <div class=act style="margin-top:.7rem">
+            <button class=btn onclick="save({d['id']})">Save</button>
+            <span class=saved id=saved>Saved</span></div>
+        </div>
+      </aside>
     </div>
     <script>
     document.getElementById('f_tags').addEventListener('click',function(e){{
@@ -545,8 +574,7 @@ def status_page():
         "<div class=wrap style='grid-template-columns:1fr'><main>"
         "<div class=titlerow><div><h1 class=title>Status</h1>"
         "<span class=count>ingestion &amp; pipeline health</span></div>"
-        "<label class=refresh><input type=checkbox id=autoref>"
-        "<span>Auto-refresh</span></label></div>"
+        + ui.autoref() + "</div>"
         f"{stats}"
         "<div class=section><p class=eyebrow>Job queue</p>" + jobs_html + "</div>"
         "<div class=section><p class=eyebrow>Gmail accounts</p>" + acct_html + "</div>"

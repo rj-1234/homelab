@@ -154,6 +154,41 @@ details.taggroup[open]>summary::before{transform:rotate(90deg)}
 .refresh{display:flex;align-items:center;gap:.42rem;font:500 .82rem 'IBM Plex Sans';color:var(--muted);
   cursor:pointer;user-select:none;padding-top:.3rem}
 .refresh input{accent-color:var(--teal);width:15px;height:15px;cursor:pointer}
+/* auto-refresh slider switch */
+.switch{display:inline-flex;align-items:center;gap:.5rem;cursor:pointer;user-select:none;
+  font:500 .82rem 'IBM Plex Sans';color:var(--muted);padding-top:.3rem}
+.switch input{position:absolute;opacity:0;width:0;height:0}
+.switch .slider{width:36px;height:20px;border-radius:20px;background:var(--line2);position:relative;transition:.15s;flex-shrink:0}
+.switch .slider::before{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;
+  background:#fff;transition:.15s;box-shadow:0 1px 2px rgba(0,0,0,.35)}
+.switch input:checked + .slider{background:var(--teal)}
+.switch input:checked + .slider::before{transform:translateX(16px)}
+/* detail: 2-column with sticky tags panel */
+.detailwrap{grid-template-columns:1fr 300px}
+@media(max-width:860px){.detailwrap{grid-template-columns:1fr}}
+.tagaside{position:sticky;top:74px;align-self:start;background:var(--card);border:1px solid var(--line);
+  border-radius:12px;box-shadow:var(--shadow);padding:1.05rem 1.1rem;max-height:calc(100vh - 96px);overflow:auto}
+@media(max-width:860px){.tagaside{position:static;max-height:none}}
+.curtags{display:flex;flex-direction:column;gap:.5rem;margin:.35rem 0 1rem}
+.ctgroup{display:flex;flex-wrap:wrap;align-items:baseline;gap:.3rem .5rem}
+.ctcat{font:600 .82rem 'Space Grotesk';text-transform:capitalize;color:var(--ink)}
+.ctsub{font:500 .73rem 'IBM Plex Mono';color:var(--teal);background:color-mix(in srgb,var(--teal) 10%,transparent);
+  border:1px solid color-mix(in srgb,var(--teal) 30%,var(--line));border-radius:12px;padding:.05em .5em}
+.ctempty{color:var(--muted);font-size:.85rem}
+.tagedit{border-top:1px solid var(--line);padding-top:.85rem}
+.pgroup{margin-bottom:.5rem}
+.pgcat{margin-bottom:.28rem}
+.pgsubs{display:flex;flex-wrap:wrap;gap:.3rem;padding-left:.85rem;border-left:2px solid var(--line)}
+.pgsubs:empty{display:none}
+/* pipeline stage strip */
+.pipeline{display:flex;gap:.4rem;align-items:center;margin:.15rem 0 .5rem;flex-wrap:wrap}
+.pstage{font:600 .64rem/1 'IBM Plex Mono';letter-spacing:.05em;text-transform:uppercase;
+  padding:.32em .6em;border-radius:5px;border:1px solid var(--line2);color:var(--muted)}
+.pstage.done{color:var(--teal);border-color:color-mix(in srgb,var(--teal) 45%,var(--line))}
+.pstage.active{color:var(--blue);border-color:color-mix(in srgb,var(--blue) 45%,var(--line));animation:pulse 1.2s ease-in-out infinite}
+.pstage.todo{opacity:.55}
+.pdone{font:700 .72rem 'Space Grotesk';color:var(--teal);margin-left:.15rem}
+@keyframes pulse{50%{opacity:.45}}
 
 /* add-document button + upload dialog */
 .add{font:600 .85rem 'Space Grotesk';background:var(--card);color:var(--ink);border:1px solid var(--line2);
@@ -297,6 +332,13 @@ def esc(s):
 
 def status_bits(status):
     return STATUS.get(status, (status or "—", "s-muted"))
+
+
+def autoref():
+    """Auto-refresh slider switch. Pages that render it opt into the shell's
+    reload script; off by default, persisted in localStorage."""
+    return ("<label class=switch><input type=checkbox id=autoref>"
+            "<span class=slider></span><span>Auto-refresh</span></label>")
 
 
 def shell(title, body, q=""):
