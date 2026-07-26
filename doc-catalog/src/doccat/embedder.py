@@ -1,10 +1,11 @@
-"""Embedding microservice: Qwen3-Embedding-0.6B on CPU behind one HTTP endpoint.
+"""Embedding microservice: bge-base-en-v1.5 on CPU behind one HTTP endpoint.
 
-Isolated in its own pod so the ~0.6B model's memory doesn't crowd the OCR
-worker. The model loads once in a background thread at startup (first run
-downloads weights to the HF cache on /srv/docs); /healthz reports 503 until it's
-resident so k8s readiness gates traffic. /embed returns L2-normalized vectors,
-so cosine similarity is a plain dot product downstream.
+Isolated in its own pod so the model's memory doesn't crowd the OCR worker. The
+model loads once in a background thread at startup (first run downloads weights
+to the HF cache on /srv/docs); /healthz reports 503 until it's resident so k8s
+readiness gates traffic. /embed returns L2-normalized vectors, so cosine
+similarity is a plain dot product downstream. Documents and category prototypes
+are both encoded as passages (no instruction prompt) so they compare directly.
 
 Run: uvicorn doccat.embedder:app --host 0.0.0.0 --port 8000
 """
@@ -29,10 +30,8 @@ def _load():
             import torch
             torch.set_num_threads(int(os.environ.get("EMBED_THREADS", "4")))
             m = SentenceTransformer(config.EMBED_MODEL, device="cpu")
-            # Bound sequence length: Qwen supports 32k but fp32 CPU activations on
-            # a multi-thousand-token input OOM the pod. ~2k tokens is ample for
-            # classification and keeps memory flat.
-            m.max_seq_length = int(os.environ.get("EMBED_MAX_TOKENS", "2048"))
+            # bge-base caps at 512 tokens natively; keep the bound explicit.
+            m.max_seq_length = int(os.environ.get("EMBED_MAX_TOKENS", "512"))
             _model = m
     return _model
 
@@ -44,7 +43,7 @@ def _startup():
 
 class EmbedIn(BaseModel):
     texts: list[str]
-    is_query: bool = False   # queries get Qwen's 'query' instruction prompt
+    is_query: bool = False   # accepted for API compat; gte-base is symmetric (ignored)
 
 
 @app.get("/healthz")
@@ -57,9 +56,6 @@ def healthz(response: Response):
 @app.post("/embed")
 def embed(inp: EmbedIn):
     m = _load()
-    kw = {"normalize_embeddings": True, "batch_size": 4}
-    if inp.is_query:
-        kw["prompt_name"] = "query"
-    vecs = m.encode(inp.texts, **kw)
+    vecs = m.encode(inp.texts, normalize_embeddings=True, batch_size=8)
     return {"vectors": [v.tolist() for v in vecs],
             "dim": (len(vecs[0]) if len(vecs) else 0)}

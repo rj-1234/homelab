@@ -72,11 +72,17 @@ def _attachments(payload):
             yield p
 
 
-def _wanted(part):
-    """Keep only document-type attachments (skip newsletter images)."""
+def _kind(part):
+    """Classify an attachment: 'doc', 'image', or None (skip). Documents are
+    kept unconditionally; images are kept but size-floored in _sync so newsletter
+    logos and tracking pixels don't flood in."""
     mt = (part.get("mimeType") or "").lower()
     fn = (part.get("filename") or "").lower()
-    return mt in config.GMAIL_ATTACH_MIME or fn.endswith(config.GMAIL_ATTACH_EXT)
+    if mt in config.GMAIL_ATTACH_MIME or fn.endswith(config.GMAIL_ATTACH_EXT):
+        return "doc"
+    if mt in config.GMAIL_IMAGE_MIME or fn.endswith(config.GMAIL_IMAGE_EXT):
+        return "image"
+    return None
 
 
 def _passes(rules, sender):
@@ -90,9 +96,11 @@ def _passes(rules, sender):
 
 
 def _backfill_query():
-    """Recency bound + a server-side filename filter from the allowlist, so the
-    list returns only document-bearing messages instead of every attachment."""
-    fn = " OR ".join(f"filename:{e.lstrip('.')}" for e in config.GMAIL_ATTACH_EXT)
+    """Optional extra filter + a server-side filename filter from the doc and
+    image allowlists, so the list returns only messages whose attachments we'd
+    actually keep instead of every attachment."""
+    exts = tuple(config.GMAIL_ATTACH_EXT) + tuple(config.GMAIL_IMAGE_EXT)
+    fn = " OR ".join(f"filename:{e.lstrip('.')}" for e in exts)
     q = config.GMAIL_INITIAL_QUERY.strip()
     return f"{q} has:attachment ({fn})" if fn else f"{q} has:attachment"
 
@@ -150,10 +158,13 @@ def _sync(account_id, email, history_id, token_path):
         received = datetime.fromtimestamp(
             int(msg["internalDate"]) / 1000, tz=timezone.utc)
         for part in _attachments(msg["payload"]):
-            if not _wanted(part):
-                continue                        # skip images / non-document parts
+            kind = _kind(part)
+            if kind is None:
+                continue                        # non-document, non-image part
             body = part["body"]
             size = body.get("size", 0) or 0
+            if kind == "image" and size and size < config.GMAIL_IMAGE_MIN_BYTES:
+                continue                        # logo / signature / tracking pixel
             if config.GMAIL_MIN_ATTACH_BYTES and size \
                     and size < config.GMAIL_MIN_ATTACH_BYTES:
                 continue                        # tiny stray file, skip

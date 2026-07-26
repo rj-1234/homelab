@@ -37,10 +37,11 @@ CLAUDE_VISION_MODEL = os.environ.get("CLAUDE_VISION_MODEL", "claude-opus-5")
 # Accounts are discovered from the files — no manual seeding.
 GMAIL_TOKENS_DIR = Path(os.environ.get("GMAIL_TOKENS_DIR", "/secrets/gmail"))
 GMAIL_POLL_INTERVAL = int(os.environ.get("GMAIL_POLL_INTERVAL", "300"))   # 5 min
-# Backfill recency bound. A `has:attachment (filename:...)` clause built from
-# GMAIL_ATTACH_EXT is appended automatically so the list returns only doc-bearing
-# messages — Gmail filters server-side and we fetch far fewer messages.
-GMAIL_INITIAL_QUERY = os.environ.get("GMAIL_INITIAL_QUERY", "newer_than:1y")
+# Extra backfill filter, prepended to the auto-built `has:attachment
+# (filename:...)` clause. Empty by default: this is a personal archive, so
+# backfill spans the whole mailbox (docs from 2016+). A `newer_than:` bound here
+# silently drops everything older — the original cause of "old docs never synced".
+GMAIL_INITIAL_QUERY = os.environ.get("GMAIL_INITIAL_QUERY", "")
 # Optional minimum attachment size. Default 0 (off): the docs-only MIME/extension
 # allowlist already excludes newsletter images, and a floor here just discards
 # legitimate small PDFs (receipts, short letters).
@@ -56,22 +57,46 @@ GMAIL_ATTACH_MIME = set(filter(None, os.environ.get(
     "application/msword,"
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
     "application/vnd.ms-excel,"
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,"
+    "application/vnd.ms-powerpoint,"
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ).split(",")))
 GMAIL_ATTACH_EXT = tuple(filter(None, os.environ.get(
-    "GMAIL_ATTACH_EXT", ".pdf,.doc,.docx,.xls,.xlsx").split(",")))
+    "GMAIL_ATTACH_EXT", ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx").split(",")))
+
+# Also ingest image attachments (phone photos / scans of documents: passport,
+# visa, signed forms). Gated by the same sender allow/deny rules, plus a size
+# floor below — real document photos are >100KB, while email-signature logos and
+# tracking pixels are tiny, so the floor keeps those out without a sender rule.
+GMAIL_IMAGE_MIME = set(filter(None, os.environ.get(
+    "GMAIL_IMAGE_MIME",
+    "image/jpeg,image/png,image/heic,image/heif,image/webp,image/tiff",
+).split(",")))
+GMAIL_IMAGE_EXT = tuple(filter(None, os.environ.get(
+    "GMAIL_IMAGE_EXT", ".jpg,.jpeg,.png,.heic,.heif,.webp,.tif,.tiff").split(",")))
+# Minimum size for an image attachment (bytes). Documents have no floor (small
+# PDFs are valid); images do, to drop logos/signatures/tracking pixels.
+GMAIL_IMAGE_MIN_BYTES = int(os.environ.get("GMAIL_IMAGE_MIN_BYTES", str(100 * 1024)))
 
 # --- Embedding + semantic tagging (Phase 7) ---------------------------------
-# Qwen3-Embedding-0.6B (1024-dim, 32k context) hosted in a dedicated CPU pod.
+# bge-base-en-v1.5 (768-dim, 512-token, standard BERT — no custom Hub code)
+# hosted in a dedicated CPU pod. Chosen over Qwen3-0.6B because the 512-token cap
+# negates Qwen's long-context/size edge; this is ~4-5x lighter for near-equal
+# accuracy. (gte-base-en-v1.5's trust_remote_code path crashed on CPU inference.)
 EMBEDDER_URL = os.environ.get("EMBEDDER_URL", "http://embedder:8000")
-EMBED_MODEL = os.environ.get("EMBED_MODEL", "Qwen/Qwen3-Embedding-0.6B")
-EMBED_DIM = int(os.environ.get("EMBED_DIM", "1024"))
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "BAAI/bge-base-en-v1.5")
+EMBED_DIM = int(os.environ.get("EMBED_DIM", "768"))
 # Cap the doc text sent for the doc-level vector (chars). 32k ctx handles it,
 # but keep a sane bound. Pages are embedded separately as chunks.
 EMBED_MAX_CHARS = int(os.environ.get("EMBED_MAX_CHARS", "2500"))
-# Cosine floor for assigning a top-level category (multi-label). Tune from the
-# UI feedback loop; zero-shot prototypes sit lower than fitted centroids.
+# Top-level category assignment (multi-label) is relative, not a fixed cutoff:
+# bge-base cosines are compressed into a narrow band (~0.45-0.67) where an
+# absolute floor tags everything. A category is assigned if its score is within
+# CLASSIFY_MARGIN of the document's top category AND above CLASSIFY_THRESHOLD
+# (a sanity floor). The margin adapts per-doc: a document that sits strongly in
+# one category gets only that; one spanning a few gets the top cluster.
 CLASSIFY_THRESHOLD = float(os.environ.get("CLASSIFY_THRESHOLD", "0.35"))
+CLASSIFY_MARGIN = float(os.environ.get("CLASSIFY_MARGIN", "0.03"))
 # Once a category has at least this many user-confirmed documents, its prototype
 # switches from the zero-shot description to the centroid of those documents'
 # vectors — accuracy that improves as you correct tags, no LLM.

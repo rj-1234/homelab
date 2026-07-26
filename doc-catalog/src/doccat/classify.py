@@ -197,15 +197,19 @@ def classify(doc_vec, prototypes, text, sender=""):
     text/sender: lowercased-internally, used for sub-tag rules.
     """
     hay = f"{text}\n{sender}".lower()
+    scores = {n: _cos(doc_vec, p) for n, p in prototypes.items() if p is not None}
     tags = set()
-    for name, (_desc, subtags) in CATEGORIES.items():
-        proto = prototypes.get(name)
-        if proto is None or _cos(doc_vec, proto) < config.CLASSIFY_THRESHOLD:
-            continue
-        tags.add(name)
-        for subtag, keywords, senders in subtags:
-            if any(k in hay for k in keywords) or any(s in hay for s in senders):
-                tags.add(subtag)
+    if scores:
+        # Relative: keep categories within CLASSIFY_MARGIN of the top score, but
+        # never below the absolute floor. Adapts to bge's compressed cosine band.
+        cutoff = max(config.CLASSIFY_THRESHOLD, max(scores.values()) - config.CLASSIFY_MARGIN)
+        for name, score in scores.items():
+            if score < cutoff:
+                continue
+            tags.add(name)
+            for subtag, keywords, senders in CATEGORIES[name][1]:
+                if any(k in hay for k in keywords) or any(s in hay for s in senders):
+                    tags.add(subtag)
     if not tags:
         tags.update(FALLBACK)
     return tags

@@ -1,0 +1,65 @@
+---
+# OCR worker. Drains the `ocr` stage only (scanned PDFs + image attachments) so
+# the memory spikes and model residency of OCR are isolated from ingest/text.
+# RapidOCR runs the PP-OCR models on ONNXRuntime (~550Mi peak on a full page);
+# the paddlepaddle base image supplies the OpenCV/system libs opencv-python
+# links against. Low-confidence pages escalate to Claude vision (if the key is
+# set). Reads blobs read-only; writes page rows to Postgres. Pinned to
+# cheeky-mini (dataset lives here).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ocr-worker
+  namespace: docs
+  labels: { app.kubernetes.io/name: ocr-worker }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app.kubernetes.io/name: ocr-worker } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: ocr-worker } }
+    spec:
+      nodeSelector: { kubernetes.io/hostname: cheeky-mini }
+      securityContext: { runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000 }
+      initContainers:
+        - name: deps
+          image: paddlepaddle/paddle:2.6.2
+          command: ["sh", "-c"]
+          args:
+            - pip install --target=/deps --no-cache-dir
+              'psycopg[binary]>=3.2' 'pymupdf>=1.24'
+              'rapidocr-onnxruntime>=1.3,<2' anthropic pillow-heif
+          volumeMounts: [{ name: deps, mountPath: /deps }]
+      containers:
+        - name: ocr-worker
+          image: paddlepaddle/paddle:2.6.2
+          command: ["python", "-m", "doccat.worker"]
+          envFrom:
+            - secretRef: { name: doccat-postgres }
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)"
+            - name: ANTHROPIC_API_KEY   # low-confidence page escalation (optional)
+              valueFrom:
+                secretKeyRef: { name: doccat-anthropic, key: ANTHROPIC_API_KEY }
+            - { name: DOCS_ROOT, value: /srv/docs }
+            - { name: WORKER_STAGES, value: "ocr" }
+            - { name: WORKER_INGEST, value: "false" }   # no inbox scan / gmail poll
+            # RapidOCR ships its PP-OCR models in the wheel (no download); HOME
+            # just needs to be writable.
+            - { name: HOME, value: /srv/docs/.paddle }
+            - { name: PYTHONPATH, value: "/deps:/app/src" }
+            - { name: PYTHONUNBUFFERED, value: "1" }
+          volumeMounts:
+            - { name: deps, mountPath: /deps }
+            - { name: app, mountPath: /app, readOnly: true }
+            - { name: docs, mountPath: /srv/docs }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { memory: 2Gi }   # RapidOCR (ONNX) peaks ~550Mi on a full-page scan
+      volumes:
+        - { name: deps, emptyDir: {} }
+        - name: app
+          hostPath: { path: /home/cheeky/github/homelab/doc-catalog, type: Directory }
+        - name: docs
+          hostPath: { path: /srv/docs, type: Directory }

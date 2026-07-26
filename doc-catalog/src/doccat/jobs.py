@@ -82,6 +82,9 @@ def _run_text(cur, doc_id):
         pages, engine = extract.pages_from_pdf(path), "pdf-text-layer"
     elif mime == "text/plain":
         pages, engine = extract.pages_from_text(path), "text"
+    elif mime in extract.OFFICE_EXTRACTORS:
+        fn, engine = extract.OFFICE_EXTRACTORS[mime]
+        pages = fn(path)
     else:
         pages, engine = [], "skip"
 

@@ -5,12 +5,15 @@ add-on — if it breaks we lose responsiveness, not data.
 """
 import time
 
-from . import config, gmail, ingest, jobs, log
+from . import config, jobs, log
 
 
 def main() -> None:
     stages = config.WORKER_STAGES
+    # gmail/ingest (and their google/puremagic deps) are only needed by an
+    # ingest worker — import them lazily so the ocr/embed workers stay lean.
     if config.WORKER_INGEST:
+        from . import gmail, ingest
         for d in (config.STAGING, config.PROCESSED, config.FAILED, config.BLOBS):
             d.mkdir(parents=True, exist_ok=True)
     log.info("worker.start", stages=list(stages), ingest=config.WORKER_INGEST,

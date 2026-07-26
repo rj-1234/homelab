@@ -1,8 +1,10 @@
 ---
-# Ingest + pipeline worker. No custom build: uses Baidu's paddlepaddle image
-# (ships Paddle + the CV system libs OpenCV needs), with our extra deps
-# pip-installed into an emptyDir by an initContainer and the app source
-# hostPath-mounted. Pinned to cheeky-mini (repo + /srv/docs dataset live here).
+# Ingest + text-extraction worker. Handles inbox/Gmail ingest and the fast
+# `text` stage (PDF text layer, plain text, and Office formats — all pure-python
+# wheels), then enqueues `ocr`/`embed` for the specialized workers to drain. No
+# OCR here, so it needs no CV system libs: plain python:3.12-slim, deps
+# pip-installed into an emptyDir + app source hostPath-mounted. Pinned to
+# cheeky-mini (repo + /srv/docs dataset live here).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,38 +22,30 @@ spec:
       securityContext: { runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000 }
       initContainers:
         - name: deps
-          image: paddlepaddle/paddle:2.6.2
+          image: python:3.12-slim
           command: ["sh", "-c"]
           args:
-            # OCR runs on RapidOCR (PP-OCR models on ONNXRuntime) — same models
-            # as Paddle but a few hundred MB instead of >6Gi. The base image
-            # still supplies the OpenCV/system libs opencv-python links against.
+            # Text/ingest deps only. OCR (RapidOCR) lives in 25-ocr-worker.yaml.
             - pip install --target=/deps --no-cache-dir
               'psycopg[binary]>=3.2' puremagic 'pymupdf>=1.24'
-              'rapidocr-onnxruntime>=1.3,<2' anthropic pillow-heif
+              python-docx python-pptx openpyxl xlrd
               google-api-python-client google-auth
           volumeMounts: [{ name: deps, mountPath: /deps }]
       containers:
         - name: worker
-          image: paddlepaddle/paddle:2.6.2
+          image: python:3.12-slim
           command: ["python", "-m", "doccat.worker"]
           envFrom:
             - secretRef: { name: doccat-postgres }
           env:
             - name: DATABASE_URL
               value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)"
-            - name: ANTHROPIC_API_KEY
-              valueFrom:
-                secretKeyRef: { name: doccat-anthropic, key: ANTHROPIC_API_KEY }
             - { name: DOCS_ROOT, value: /srv/docs }
-            # Ingest + fast pipeline. Embedding is drained by the separate
-            # embed-worker (60-embed-worker.yaml) so a slow doc never blocks these.
-            - { name: WORKER_STAGES, value: "text,ocr" }
+            # Ingest + the fast text stage. OCR and embedding are drained by the
+            # ocr-worker (25) and embed-worker (60) so neither blocks ingest.
+            - { name: WORKER_STAGES, value: "text" }
             - { name: WORKER_INGEST, value: "true" }
-            # RapidOCR ships its PP-OCR models inside the wheel (no runtime
-            # download); HOME just needs to be a writable path.
-            - { name: HOME, value: /srv/docs/.paddle }
-            # Image ships Paddle in site-packages; /deps adds our libs on top.
+            - { name: HOME, value: /tmp }        # writable HOME for any lib cache
             - { name: PYTHONPATH, value: "/deps:/app/src" }
             - { name: PYTHONUNBUFFERED, value: "1" }
           volumeMounts:
@@ -62,8 +56,8 @@ spec:
             # if the secret is absent the deploy still runs (gmail.poll no-ops).
             - { name: gmail, mountPath: /secrets/gmail, readOnly: true }
           resources:
-            requests: { cpu: 250m, memory: 512Mi }
-            limits: { memory: 2Gi }   # RapidOCR (ONNX) peaks ~550Mi on a full-page scan
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { memory: 1Gi }   # text/office extraction is light
       volumes:
         - { name: deps, emptyDir: {} }
         - name: app
