@@ -78,14 +78,15 @@ spec:
               mountPath: /data/library
               readOnly: true
               mountPropagation: HostToContainer
-            - name: dri
-              mountPath: /dev/dri
           resources:
             requests:
               cpu: 250m
               memory: 512Mi
             limits:
               memory: 4Gi
+              # iGPU via the Intel device plugin (handles the device-cgroup allow
+              # that a bare hostPath /dev/dri cannot). Node advertises this.
+              gpu.intel.com/i915: "1"
           livenessProbe:
             httpGet:
               path: /health
@@ -119,8 +120,4 @@ spec:
         - name: library
           hostPath:
             path: /srv/data/media
-            type: Directory
-        - name: dri
-          hostPath:
-            path: /dev/dri
             type: Directory

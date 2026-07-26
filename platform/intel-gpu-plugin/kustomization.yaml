@@ -1,0 +1,12 @@
+---
+# Intel GPU device plugin — advertises the iGPU as gpu.intel.com/i915 and
+# handles the device-cgroup allow that a bare hostPath /dev/dri cannot (a
+# non-privileged pod can see renderD128 but not open() it). Jellyfin requests
+# gpu.intel.com/i915: "1" instead of mounting /dev/dri directly.
+#
+#   kubectl apply -k platform/intel-gpu-plugin/
+#
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - https://github.com/intel/intel-device-plugins-for-kubernetes/deployments/gpu_plugin?ref=v0.32.1
