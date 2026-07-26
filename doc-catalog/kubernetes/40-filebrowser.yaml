@@ -1,0 +1,52 @@
+---
+# FileBrowser — the watch folder IS the upload UI. Dropping a file here is
+# ingestion. Serves /srv/docs/inbox; DB/config persist on the dataset. Exposed
+# tailnet-only via `tailscale serve` (no public ingress — principle #5).
+# First run creates admin/admin — change it immediately.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: filebrowser
+  namespace: docs
+  labels: { app.kubernetes.io/name: filebrowser }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app.kubernetes.io/name: filebrowser } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: filebrowser } }
+    spec:
+      nodeSelector: { kubernetes.io/hostname: cheeky-mini }
+      securityContext: { runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000 }
+      containers:
+        - name: filebrowser
+          image: filebrowser/filebrowser:latest
+          env:
+            - { name: FB_ROOT, value: /srv }        # serves the inbox
+            - { name: FB_DATABASE, value: /db/filebrowser.db }
+            - { name: FB_PORT, value: "8080" }
+            - { name: FB_NOAUTH, value: "false" }
+          ports: [{ name: http, containerPort: 8080 }]
+          volumeMounts:
+            - { name: inbox, mountPath: /srv }        # upload target
+            - { name: fbdb, mountPath: /db }
+          resources:
+            requests: { cpu: 10m, memory: 64Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - name: inbox
+          hostPath: { path: /srv/docs/inbox, type: Directory }
+        - name: fbdb
+          hostPath: { path: /srv/docs/.filebrowser, type: Directory }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: filebrowser
+  namespace: docs
+  labels: { app.kubernetes.io/name: filebrowser }
+spec:
+  type: ClusterIP
+  clusterIP: 10.43.200.31
+  selector: { app.kubernetes.io/name: filebrowser }
+  ports: [{ name: http, port: 8080, targetPort: http }]

@@ -1,0 +1,10 @@
+# local dev
+.venv/
+__pycache__/
+*.pyc
+uv.lock
+# never commit secrets — creds live in k8s Secrets
+*.secret.yaml
+secret.yaml
+token*.json
+client_secret*.json

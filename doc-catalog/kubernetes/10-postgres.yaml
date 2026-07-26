@@ -1,0 +1,59 @@
+---
+# Postgres with pgvector. Single node: hostPath on the rpool/docs dataset,
+# pinned to cheeky-mini. Not a local-path PVC because we want the data on the
+# dedicated dataset we snapshot/back up (principle #5).
+#
+# Secret is created out-of-band, NEVER committed:
+#   kubectl -n docs create secret generic doccat-postgres \
+#     --from-literal=POSTGRES_USER=doccat \
+#     --from-literal=POSTGRES_PASSWORD=<pw> \
+#     --from-literal=POSTGRES_DB=doccat
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: docs
+  labels: { app.kubernetes.io/name: postgres }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app.kubernetes.io/name: postgres } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: postgres } }
+    spec:
+      nodeSelector: { kubernetes.io/hostname: cheeky-mini }
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 999      # postgres uid in the image
+        runAsGroup: 999
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg16
+          envFrom:
+            - secretRef: { name: doccat-postgres }
+          env:
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports: [{ name: pg, containerPort: 5432 }]
+          volumeMounts:
+            - { name: pgdata, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "doccat"] }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 1Gi }
+      volumes:
+        - name: pgdata
+          hostPath: { path: /srv/docs/pg, type: Directory }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: docs
+  labels: { app.kubernetes.io/name: postgres }
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: postgres }
+  ports: [{ name: pg, port: 5432, targetPort: pg }]

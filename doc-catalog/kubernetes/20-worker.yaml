@@ -1,0 +1,52 @@
+---
+# Ingest worker. No custom image: stock python:3.12-slim, deps pip-installed into
+# an emptyDir by an initContainer, app source hostPath-mounted from the repo.
+# Pinned to cheeky-mini (repo + /srv/docs dataset live here).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: docs
+  labels: { app.kubernetes.io/name: worker }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # single writer over the inbox/blobs
+  selector: { matchLabels: { app.kubernetes.io/name: worker } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: worker } }
+    spec:
+      nodeSelector: { kubernetes.io/hostname: cheeky-mini }
+      securityContext: { runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000 }
+      initContainers:
+        - name: deps
+          image: python:3.12-slim
+          command: ["sh", "-c"]
+          args:
+            - pip install --target=/deps --no-cache-dir
+              'psycopg[binary]>=3.2' puremagic 'fastapi>=0.115' 'uvicorn[standard]>=0.32'
+          volumeMounts: [{ name: deps, mountPath: /deps }]
+      containers:
+        - name: worker
+          image: python:3.12-slim
+          command: ["python", "-m", "doccat.worker"]
+          envFrom:
+            - secretRef: { name: doccat-postgres }
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)"
+            - { name: DOCS_ROOT, value: /srv/docs }
+            - { name: PYTHONPATH, value: /deps:/app/src }
+            - { name: PYTHONUNBUFFERED, value: "1" }
+          volumeMounts:
+            - { name: deps, mountPath: /deps }
+            - { name: app, mountPath: /app, readOnly: true }
+            - { name: docs, mountPath: /srv/docs }
+          resources:
+            requests: { cpu: 25m, memory: 128Mi }
+            limits: { memory: 512Mi }
+      volumes:
+        - { name: deps, emptyDir: {} }
+        - name: app
+          hostPath: { path: /home/cheeky/github/homelab/doc-catalog, type: Directory }
+        - name: docs
+          hostPath: { path: /srv/docs, type: Directory }

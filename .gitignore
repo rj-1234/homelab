@@ -7,6 +7,10 @@ cloudflared-token*
 *.key
 kubeconfig
 .env
+# OAuth client secrets / tokens (Gmail, etc.) — belong in ~/.config or a k8s Secret
+client_secret*.json
+*token*.json
+credentials.json
 
 # The old Cloudflare helm values held a live tunnel token — keep it untracked.
 cloudflare-tunnel/kubernetes/values.yaml
