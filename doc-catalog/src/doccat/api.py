@@ -159,17 +159,34 @@ def detail(doc_id: int):
             "<div class=wrap><main><div class=empty><b>No such document</b>"
             "<a href=/>Back to the catalog</a></div></main></div>"), status_code=404)
 
-    prov = _rows("SELECT source, source_ref, sender, received_at, created_at"
+    prov = _rows("SELECT source, source_ref, sender, subject, received_at, created_at"
                  " FROM source_event WHERE blob_sha=%s ORDER BY created_at", (d["sha"],))
     pages = _rows("SELECT page_no, engine, text FROM page WHERE document_id=%s ORDER BY page_no",
                   (doc_id,))
     label, cls = ui.status_bits(d["status"])
+    accounts = {a["id"]: a["email"] for a in
+                _rows("SELECT id, email FROM account WHERE provider='gmail'")}
 
-    prov_html = "".join(
-        f"<li><span class=when>{(p['received_at'] or p['created_at']):%Y-%m-%d %H:%M}</span>"
-        f"<span>{ui.esc(p['source'])} · <span class=mono>{ui.esc(p['source_ref'])}</span></span></li>"
-        for p in prov
-    )
+    def _prov_li(p):
+        when = (p["received_at"] or p["created_at"]).strftime("%Y-%m-%d %H:%M")
+        src = p["source"]
+        bits = [f"<span class='src {ui.esc(src)}'>{ui.esc(src)}</span>"]
+        if src == "gmail":
+            # source_ref = gmail:<account_id>:<message_id>:<part_id>
+            parts = (p["source_ref"] or "").split(":")
+            acct = accounts.get(int(parts[1])) if len(parts) > 1 and parts[1].isdigit() else None
+            if acct:
+                bits.append(f"<span class=to>to {ui.esc(acct)}</span>")
+            if p["sender"]:
+                bits.append(f"<span class=frm>from {ui.esc(p['sender'])}</span>")
+            if p["subject"]:
+                bits.append(f"<span class=subj>“{ui.esc(p['subject'])}”</span>")
+        else:
+            bits.append(f"<span class=mono>{ui.esc(p['source_ref'])}</span>")
+        return (f"<li><span class=when>{when}</span>"
+                f"<span class=pv>{''.join(bits)}</span></li>")
+
+    prov_html = "".join(_prov_li(p) for p in prov)
     pages_html = "".join(
         f"<details class=page {'open' if p['page_no']==1 else ''}>"
         f"<summary>Page {p['page_no']} · {ui.esc(p['engine'] or '—')} · {len(p['text'] or '')} chars</summary>"
@@ -198,8 +215,12 @@ def detail(doc_id: int):
             <span>{d['size']:,} bytes</span>
             <span>{d['pages'] or 0} pages</span>
             <span>{d['created_at']:%Y-%m-%d %H:%M}</span></div>
-          <div class=act style="margin-top:.8rem">
+          <div class=act style="margin-top:.8rem;flex-wrap:wrap">
             <a class='btn ghost' href='/doc/{d['id']}/raw' target=_blank>View original</a>
+            <button class='btn ghost' onclick="reprocess({d['id']},'text')">Re-run text</button>
+            <button class='btn ghost' onclick="reprocess({d['id']},'ocr')">Re-run OCR</button>
+            <button class='btn danger' onclick="del({d['id']})">Delete</button>
+            <span class=saved id=act_msg></span>
           </div>
 
           <div class=section>
@@ -235,6 +256,19 @@ def detail(doc_id: int):
       if(r.ok){{s.textContent='Saved';s.classList.add('show');setTimeout(()=>s.classList.remove('show'),1600);}}
       else{{s.textContent='Save failed';s.classList.add('show');}}
     }}
+    async function reprocess(id,stage){{
+      const m=document.getElementById('act_msg');
+      const r=await fetch('/api/doc/'+id+'/reprocess',{{method:'POST',
+        headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{stage:stage}})}});
+      m.textContent=r.ok?('Queued '+stage):'Failed';m.classList.add('show');
+      setTimeout(()=>m.classList.remove('show'),2000);
+    }}
+    async function del(id){{
+      if(!confirm('Delete this document, its text, and its stored file? This cannot be undone.'))return;
+      const r=await fetch('/api/doc/'+id+'/delete',{{method:'POST'}});
+      if(r.ok){{location.href='/';}}
+      else{{const m=document.getElementById('act_msg');m.textContent='Delete failed';m.classList.add('show');}}
+    }}
     </script>
     """
     return ui.shell(d["title"], sheet)
@@ -269,6 +303,62 @@ async def update(doc_id: int, request: Request):
                 tag_id = cur.fetchone()[0]
                 cur.execute("INSERT INTO document_tag(document_id,tag_id) VALUES(%s,%s)"
                             " ON CONFLICT DO NOTHING", (doc_id, tag_id))
+    return {"ok": True}
+
+
+@app.post("/api/doc/{doc_id}/reprocess")
+async def reprocess(doc_id: int, request: Request):
+    """Manually enqueue a pipeline stage for a document (retry text/OCR)."""
+    p = await request.json()
+    stage = p.get("stage", "text")
+    if stage not in ("text", "ocr"):
+        return JSONResponse({"error": "stage must be text|ocr"}, status_code=400)
+    with db.connect() as c:
+        if not c.execute("SELECT 1 FROM document WHERE id=%s", (doc_id,)).fetchone():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        c.execute("INSERT INTO job(document_id,stage) VALUES(%s,%s)", (doc_id, stage))
+    return {"ok": True, "stage": stage}
+
+
+@app.post("/api/doc/{doc_id}/delete")
+def delete_doc(doc_id: int):
+    """Delete a document, its derived rows, and (if no other document shares it)
+    its blob row, provenance, and stored file."""
+    path = None
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            row = cur.execute("SELECT primary_blob_sha FROM document WHERE id=%s",
+                              (doc_id,)).fetchone()
+            if not row:
+                return JSONResponse({"error": "not found"}, status_code=404)
+            sha = row[0]
+            for sql in (
+                "DELETE FROM job WHERE document_id=%s",
+                "DELETE FROM page WHERE document_id=%s",
+                "DELETE FROM extraction WHERE document_id=%s",
+                "DELETE FROM chunk WHERE document_id=%s",
+                "DELETE FROM fingerprint WHERE document_id=%s",
+                "DELETE FROM document_tag WHERE document_id=%s",
+            ):
+                cur.execute(sql, (doc_id,))
+            cur.execute("DELETE FROM duplicate_link WHERE document_id=%s"
+                        " OR other_document_id=%s", (doc_id, doc_id))
+            cur.execute("UPDATE document SET canonical_document_id=NULL"
+                        " WHERE canonical_document_id=%s", (doc_id,))
+            cur.execute("DELETE FROM document WHERE id=%s", (doc_id,))
+            # blob is content-addressed and may be shared (dedupe) — drop it only
+            # when no remaining document references it.
+            if not cur.execute("SELECT 1 FROM document WHERE primary_blob_sha=%s"
+                               " LIMIT 1", (sha,)).fetchone():
+                r = cur.execute("SELECT path FROM blob WHERE sha256=%s", (sha,)).fetchone()
+                path = r[0] if r else None
+                cur.execute("DELETE FROM source_event WHERE blob_sha=%s", (sha,))
+                cur.execute("DELETE FROM blob WHERE sha256=%s", (sha,))
+    if path:
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError:
+            pass
     return {"ok": True}
 
 

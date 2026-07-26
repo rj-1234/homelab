@@ -9,14 +9,20 @@ routes it to OCR. Returns [(page_no, text), ...], page_no 1-based.
 import pymupdf
 
 
+def _clean(s):
+    """Strip NUL (0x00) — Postgres text columns reject it and PDFs occasionally
+    embed it in a text layer."""
+    return s.replace("\x00", "")
+
+
 def pages_from_pdf(path):
     out = []
     with pymupdf.open(path) as doc:
         for i, page in enumerate(doc):
-            out.append((i + 1, page.get_text().strip()))
+            out.append((i + 1, _clean(page.get_text().strip())))
     return out
 
 
 def pages_from_text(path):
     with open(path, encoding="utf-8", errors="replace") as f:
-        return [(1, f.read())]
+        return [(1, _clean(f.read()))]

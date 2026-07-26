@@ -106,7 +106,15 @@ h1.title{font-family:'Space Grotesk';font-weight:700;font-size:1.5rem;letter-spa
 .section{border-top:1px solid var(--line);margin-top:1.4rem;padding-top:1.2rem}
 .prov{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:.5rem}
 .prov li{font-size:.9rem;display:flex;gap:.7rem}
-.prov .when{font-family:'IBM Plex Mono';font-size:.78rem;color:var(--muted);white-space:nowrap}
+.prov .when{font-family:'IBM Plex Mono';font-size:.78rem;color:var(--muted);white-space:nowrap;padding-top:.15rem}
+.prov .pv{display:flex;flex-wrap:wrap;gap:.4rem .55rem;align-items:baseline}
+.prov .src{font:600 .6rem/1 'IBM Plex Mono';letter-spacing:.06em;text-transform:uppercase;
+  padding:.28em .5em;border-radius:5px;border:1px solid var(--line2);color:var(--muted)}
+.prov .src.gmail{color:var(--stamp);border-color:color-mix(in srgb,var(--stamp) 45%,var(--line))}
+.prov .src.upload{color:var(--blue);border-color:color-mix(in srgb,var(--blue) 45%,var(--line))}
+.prov .to{font-family:'IBM Plex Mono';font-size:.78rem;color:var(--teal)}
+.prov .frm{font-size:.85rem;color:var(--ink)}
+.prov .subj{font-size:.85rem;color:var(--muted);font-style:italic}
 details.page{border:1px solid var(--line);border-radius:8px;margin-top:.5rem;background:var(--paper)}
 details.page>summary{cursor:pointer;padding:.55rem .8rem;font-family:'IBM Plex Mono';font-size:.8rem;color:var(--muted)}
 details.page[open]>summary{color:var(--ink);border-bottom:1px solid var(--line)}
@@ -119,6 +127,8 @@ details.page pre{margin:0;padding:.8rem;white-space:pre-wrap;font:400 .82rem/1.5
 .act{display:flex;gap:.6rem;align-items:center;margin-top:.4rem}
 .btn{font:600 .88rem 'Space Grotesk';background:var(--teal);color:#fff;border:none;border-radius:7px;padding:.55rem 1.1rem;cursor:pointer}
 .btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--line2)}
+.btn.danger{background:transparent;color:var(--stamp);border:1px solid color-mix(in srgb,var(--stamp) 45%,var(--line2))}
+.btn.danger:hover{background:color-mix(in srgb,var(--stamp) 10%,transparent)}
 .saved{color:var(--teal);font-family:'IBM Plex Mono';font-size:.8rem;opacity:0;transition:opacity .2s}
 .saved.show{opacity:1}
 

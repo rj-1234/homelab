@@ -6,18 +6,22 @@ import os
 
 from . import config, db, extract, log
 
-MAX_ATTEMPTS = 3
+MAX_ATTEMPTS = 5
 
 
 def claim():
-    """Atomically take one pending job and mark it running. Returns
-    (job_id, document_id, stage) or None. The row lock is released on commit;
-    state='running' keeps other workers from re-claiming it."""
+    """Atomically take one *eligible* pending job and mark it running. Returns
+    (job_id, document_id, stage) or None. Eligibility enforces exponential
+    backoff between attempts: a job that just errored waits 2**attempts minutes
+    (2, 4, 8, 16) before it can be reclaimed. Fresh jobs (locked_at NULL) run
+    immediately. state='running' keeps other workers from re-claiming it."""
     conn = db.connect()
     with conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, document_id, stage FROM job WHERE state='pending' "
+                "AND (locked_at IS NULL OR "
+                "     now() >= locked_at + (interval '1 minute' * power(2, attempts))) "
                 "ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1"
             )
             row = cur.fetchone()
@@ -29,6 +33,21 @@ def claim():
                 (row[0],),
             )
     return row
+
+
+def reconcile():
+    """Requeue jobs that failed but haven't exhausted MAX_ATTEMPTS (e.g. failed
+    under an older lower cap, or manually re-run). They retry under the same
+    backoff. Idempotent; called once per worker loop. Prior error text is kept
+    for visibility until the retry succeeds or truly fails."""
+    with db.connect() as c:
+        n = c.execute(
+            "UPDATE job SET state='pending' "
+            "WHERE state='failed' AND attempts < %s", (MAX_ATTEMPTS,)
+        ).rowcount
+    if n:
+        log.info("jobs.reconciled", requeued=n)
+    return n
 
 
 def _blob_for(cur, document_id):
@@ -89,6 +108,7 @@ def _run_ocr(cur, doc_id):
                     text, engine, conf = escalated, "claude-vision", 1.0
             except Exception as e:  # noqa: BLE001
                 log.warn("ocr.claude_failed", doc=doc_id, page=pno, error=str(e))
+        text = text.replace("\x00", "")     # Postgres text rejects NUL
         if text.strip():
             any_text = True
         cur.execute(

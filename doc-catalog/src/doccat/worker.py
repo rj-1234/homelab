@@ -19,6 +19,7 @@ def main() -> None:
     while True:
         try:
             ingest.scan_once(seen)   # ingest new uploads
+            jobs.reconcile()         # requeue retryable failed jobs (backoff)
             jobs.drain()             # run pending pipeline jobs (text extraction)
             now = time.monotonic()
             if now - last_gmail >= config.GMAIL_POLL_INTERVAL:
