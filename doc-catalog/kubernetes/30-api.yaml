@@ -22,6 +22,7 @@ spec:
           args:
             - pip install --target=/deps --no-cache-dir
               'psycopg[binary]>=3.2' puremagic 'fastapi>=0.115' 'uvicorn[standard]>=0.32'
+              python-multipart
           volumeMounts: [{ name: deps, mountPath: /deps }]
       containers:
         - name: api
@@ -44,6 +45,9 @@ spec:
             - { name: app, mountPath: /app, readOnly: true }
             # Read-only blob store so /doc/{id}/raw can serve originals.
             - { name: blobs, mountPath: /srv/docs/blobs, readOnly: true }
+            # Read-write inbox so the "+ Add document" upload lands files the
+            # worker's scan then ingests.
+            - { name: inbox, mountPath: /srv/docs/inbox }
           resources:
             requests: { cpu: 25m, memory: 128Mi }
             limits: { memory: 256Mi }
@@ -53,6 +57,8 @@ spec:
           hostPath: { path: /home/cheeky/github/homelab/doc-catalog, type: Directory }
         - name: blobs
           hostPath: { path: /srv/docs/blobs, type: Directory }
+        - name: inbox
+          hostPath: { path: /srv/docs/inbox, type: Directory }
 ---
 apiVersion: v1
 kind: Service

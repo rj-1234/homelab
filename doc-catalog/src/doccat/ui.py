@@ -121,6 +121,90 @@ details.page pre{margin:0;padding:.8rem;white-space:pre-wrap;font:400 .82rem/1.5
 .btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--line2)}
 .saved{color:var(--teal);font-family:'IBM Plex Mono';font-size:.8rem;opacity:0;transition:opacity .2s}
 .saved.show{opacity:1}
+
+/* add-document button + upload dialog */
+.add{font:600 .85rem 'Space Grotesk';background:var(--card);color:var(--ink);border:1px solid var(--line2);
+  border-radius:8px;padding:.55rem .85rem;cursor:pointer;white-space:nowrap}
+.add:hover{border-color:var(--teal);color:var(--teal)}
+/* phone: brand + Add on row one, search stretches to its own row below */
+@media(max-width:560px){
+  .bar .in{flex-wrap:wrap;gap:.55rem .75rem;padding:.7rem .95rem}
+  .brand{order:1} .brand small{display:none}
+  .add{order:2;margin-left:auto}
+  form.search{order:3;flex-basis:100%}
+}
+dialog.up{border:1px solid var(--line2);border-radius:14px;padding:0;max-width:460px;width:92vw;
+  background:var(--card);color:var(--ink);box-shadow:0 24px 64px rgba(0,0,0,.34)}
+dialog.up::backdrop{background:rgba(10,12,8,.45);backdrop-filter:blur(2px)}
+.up form{padding:1.3rem 1.4rem 1.2rem}
+.uphead{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
+.uphead b{font-family:'Space Grotesk';font-size:1.12rem}
+.up .x{background:none;border:none;color:var(--muted);font-size:1.05rem;cursor:pointer;line-height:1}
+.drop{display:grid;place-items:center;text-align:center;min-height:118px;padding:1rem;cursor:pointer;
+  border:1.5px dashed var(--line2);border-radius:10px;background:var(--paper);color:var(--muted);transition:.15s}
+.drop:hover,.drop.over{border-color:var(--teal);color:var(--ink);
+  background:color-mix(in srgb,var(--teal) 6%,var(--paper))}
+.drop u{color:var(--teal)}
+.uplist{list-style:none;margin:.8rem 0 0;padding:0;display:flex;flex-direction:column;gap:.3rem;max-height:150px;overflow:auto}
+.uplist li{font:400 .8rem 'IBM Plex Mono';display:flex;justify-content:space-between;gap:.6rem;color:var(--ink);
+  border:1px solid var(--line);border-radius:6px;padding:.35rem .6rem}
+.uplist li span{color:var(--muted);white-space:nowrap}
+.upact{display:flex;gap:.6rem;justify-content:flex-end;margin-top:1.1rem}
+.upnote{font:400 .74rem/1.45 'IBM Plex Sans';color:var(--muted);margin:.9rem 0 0}
+"""
+
+# Injected once per page by shell(); the <dialog> the "+ Add document" button opens.
+_UPLOAD = """
+<dialog id=up class=up>
+  <form id=upform>
+    <div class=uphead><b>Add to the Registry</b>
+      <button type=button class=x onclick="document.getElementById('up').close()">✕</button></div>
+    <label class=drop id=updrop>
+      <input type=file id=upfiles multiple hidden>
+      <span id=uphint>Drop files here, or <u>browse</u></span>
+    </label>
+    <ul id=uplist class=uplist></ul>
+    <div class=upact>
+      <button type=button class='btn ghost' onclick="document.getElementById('up').close()">Cancel</button>
+      <button type=submit class=btn id=upbtn>Upload</button>
+    </div>
+    <p class=upnote>Files land in the catalog within a minute — dedupe and text
+      extraction run automatically. Uploading a file already on record just adds
+      provenance; it is not stored twice.</p>
+  </form>
+</dialog>
+<script>
+(function(){
+  var dlg=document.getElementById('up'); if(!dlg) return;
+  var inp=document.getElementById('upfiles'), drop=document.getElementById('updrop'),
+      list=document.getElementById('uplist'), form=document.getElementById('upform'),
+      btn=document.getElementById('upbtn'), hint=document.getElementById('uphint');
+  function kb(n){return n<1024?n+' B':(n<1048576?(n/1024|0)+' KB':(n/1048576).toFixed(1)+' MB');}
+  function render(){
+    list.innerHTML=[].map.call(inp.files,function(f){
+      return '<li><span class=fn>'+f.name+'</span><span>'+kb(f.size)+'</span></li>';}).join('');
+  }
+  inp.addEventListener('change',render);
+  ['dragover','dragenter'].forEach(function(e){drop.addEventListener(e,function(ev){
+    ev.preventDefault();drop.classList.add('over');});});
+  ['dragleave','drop'].forEach(function(e){drop.addEventListener(e,function(ev){
+    ev.preventDefault();drop.classList.remove('over');});});
+  drop.addEventListener('drop',function(ev){inp.files=ev.dataTransfer.files;render();});
+  dlg.addEventListener('close',function(){inp.value='';list.innerHTML='';
+    btn.disabled=false;btn.textContent='Upload';});
+  form.addEventListener('submit',function(ev){
+    ev.preventDefault();
+    if(!inp.files.length){drop.classList.add('over');return;}
+    var fd=new FormData();
+    [].forEach.call(inp.files,function(f){fd.append('files',f);});
+    btn.disabled=true;btn.textContent='Uploading…';
+    fetch('/api/upload',{method:'POST',body:fd}).then(function(r){
+      if(r.ok){location.reload();}
+      else{btn.textContent='Failed — retry';btn.disabled=false;}
+    }).catch(function(){btn.textContent='Failed — retry';btn.disabled=false;});
+  });
+})();
+</script>
 """
 
 
@@ -143,8 +227,10 @@ def shell(title, body, q=""):
         f"<form class=search method=get action=/>"
         f"<input name=q placeholder='Search the catalog…' value=\"{esc(q)}\" autocomplete=off>"
         "<button>Search</button></form>"
+        "<button class=add type=button onclick=\"document.getElementById('up').showModal()\">"
+        "+ Add document</button>"
         "</div></header>"
-        f"{body}</body></html>"
+        f"{body}{_UPLOAD}</body></html>"
     )
 
 

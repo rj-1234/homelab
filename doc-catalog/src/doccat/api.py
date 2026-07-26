@@ -2,12 +2,16 @@
 
 Run: uvicorn doccat.api:app --host 0.0.0.0 --port 8000
 """
+import os
+import re
+import shutil
+import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-from . import db, ui
+from . import config, db, ui
 
 app = FastAPI(title="Document Catalog")
 
@@ -129,7 +133,7 @@ def index(q: str = "", status: str = "", tag: str = ""):
         cards = "<div class=stack>" + "".join(ui.card(d) for d in docs) + "</div>"
     else:
         cards = ("<div class=empty><b>Nothing here yet</b>"
-                 "Drop a file into FileBrowser — it lands in the catalog within a minute.</div>"
+                 "Use <b>Add document</b> up top — it lands in the catalog within a minute.</div>"
                  if not (q or status or tag) else
                  "<div class=empty><b>No matches</b>Try a different term or clear the filter.</div>")
 
@@ -266,3 +270,41 @@ async def update(doc_id: int, request: Request):
                 cur.execute("INSERT INTO document_tag(document_id,tag_id) VALUES(%s,%s)"
                             " ON CONFLICT DO NOTHING", (doc_id, tag_id))
     return {"ok": True}
+
+
+# --- upload ------------------------------------------------------------------
+_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _safe_name(name: str) -> str:
+    """Basename only, restricted charset, length-capped — never a path."""
+    base = os.path.basename((name or "").strip()) or "upload"
+    base = _SAFE.sub("_", base).lstrip(".") or "upload"
+    return base[-180:]
+
+
+@app.post("/api/upload")
+async def upload(files: list[UploadFile] = File(...)):
+    """Land uploads directly in the inbox; the worker's scan ingests them.
+    Written to a dot-prefixed temp (scanner skips dotfiles) then atomically
+    renamed in-place, so a half-written file is never claimed."""
+    inbox = config.INBOX
+    inbox.mkdir(parents=True, exist_ok=True)
+    queued = []
+    for f in files:
+        name = _safe_name(f.filename)
+        dest = inbox / name
+        if dest.exists():                       # don't clobber a pending upload
+            stem, ext = os.path.splitext(name)
+            dest = inbox / f"{stem}-{uuid.uuid4().hex[:6]}{ext}"
+        tmp = inbox / f".upload-{uuid.uuid4().hex}.part"
+        try:
+            with tmp.open("wb") as out:
+                shutil.copyfileobj(f.file, out)
+            os.replace(tmp, dest)               # atomic within the dataset
+        finally:
+            if tmp.exists():
+                tmp.unlink()
+            await f.close()
+        queued.append(dest.name)
+    return {"ok": True, "queued": queued}
