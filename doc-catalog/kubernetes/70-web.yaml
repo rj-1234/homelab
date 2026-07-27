@@ -61,6 +61,9 @@ spec:
             httpGet: { path: /, port: http }
             initialDelaySeconds: 3
             periodSeconds: 10
+            # tolerate the brief window where `npm run build` empties build/ and
+            # caddy 404s on / — don't evict the pod for a rebuild.
+            failureThreshold: 12
           volumeMounts:
             - { name: caddyfile, mountPath: /etc/caddy }
             - { name: web, mountPath: /srv/web, readOnly: true }

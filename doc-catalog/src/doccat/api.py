@@ -454,8 +454,13 @@ def _status_data():
         " WHERE j.state='failed' ORDER BY j.id DESC LIMIT 10")
     docs = _one("SELECT count(*) AS n FROM document"
                 " WHERE canonical_document_id IS NULL")
+    fields = _one(
+        "SELECT count(*) FILTER (WHERE confirmed) AS confirmed,"
+        " count(*) FILTER (WHERE NOT confirmed) AS review FROM field")
     return {"accounts": accounts, "jobs": jobs, "sources": sources,
-            "failures": failures, "documents": docs["n"] if docs else 0}
+            "failures": failures, "documents": docs["n"] if docs else 0,
+            "fields": {"confirmed": fields["confirmed"] if fields else 0,
+                       "review": fields["review"] if fields else 0}}
 
 
 @app.get("/api/status")
