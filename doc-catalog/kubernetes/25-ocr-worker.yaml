@@ -41,7 +41,10 @@ spec:
               value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)"
             - name: ANTHROPIC_API_KEY   # low-confidence page escalation (optional)
               valueFrom:
-                secretKeyRef: { name: doccat-anthropic, key: ANTHROPIC_API_KEY }
+                secretKeyRef:
+                  name: doccat-anthropic
+                  key: ANTHROPIC_API_KEY
+                  optional: true   # deploy/OCR works without the key (RapidOCR only)
             - { name: DOCS_ROOT, value: /srv/docs }
             - { name: WORKER_STAGES, value: "ocr" }
             - { name: WORKER_INGEST, value: "false" }   # no inbox scan / gmail poll

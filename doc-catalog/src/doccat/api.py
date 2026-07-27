@@ -208,7 +208,7 @@ def detail(doc_id: int):
     # --- pipeline stage strip: which stage each doc is at, or Done ------------
     jobs_for = _rows("SELECT stage, state FROM job WHERE document_id=%s", (doc_id,))
     active = {j["stage"] for j in jobs_for if j["state"] in ("pending", "running")}
-    ocr_pages = any((p["engine"] or "") in ("paddleocr", "claude-vision") for p in pages)
+    ocr_pages = any((p["engine"] or "") in ("paddleocr", "rapidocr", "claude-vision") for p in pages)
 
     def _pstate(stage, done):
         return "active" if stage in active else ("done" if done else "todo")
@@ -522,8 +522,11 @@ def status_page():
             chips = "".join(
                 f"<span class='rule {r['action']}'>{ui.esc(r['pattern'])}"
                 f"<span class=ra>{r['action']}</span>"
+                # json.dumps -> JS-safe string literal, ui.esc -> attribute-safe.
+                # (ui.esc alone HTML-escapes for a JS literal, which an apostrophe
+                # in the pattern would then break / could inject.)
                 f"<button class=rx title=remove onclick=\"delRule({a['id']},"
-                f"'{ui.esc(r['pattern'])}','{r['action']}')\">×</button></span>"
+                f"{ui.esc(json.dumps(r['pattern']))},{ui.esc(json.dumps(r['action']))})\">×</button></span>"
                 for r in rules) or "<span class=m>no rules — all senders ingested</span>"
             synced = ("synced " + a["last_full_sync_at"].strftime("%Y-%m-%d %H:%M")
                       if a["last_full_sync_at"] else "never synced")

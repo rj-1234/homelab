@@ -169,8 +169,13 @@ def _prototypes():
     from . import classify
 
     with db.connect() as c:
+        # Signature over the confirmed-tag set, not just its size: a DELETE+INSERT
+        # that swaps M tags for M different ones (api.save) keeps count(*) constant
+        # but must still invalidate the cache so corrections take effect.
         confirmed = c.execute(
-            "SELECT count(*) FROM document_tag WHERE source='user'").fetchone()[0]
+            "SELECT coalesce(md5(string_agg(document_id || ':' || tag_id,"
+            " ',' ORDER BY document_id, tag_id)), '')"
+            " FROM document_tag WHERE source='user'").fetchone()[0]
     if _proto_state["protos"] is not None and _proto_state["confirmed"] == confirmed:
         return _proto_state["protos"]
 
