@@ -489,6 +489,96 @@ def api_events():
                  "Connection": "keep-alive"})
 
 
+# --- field vault (Phase 8) ---------------------------------------------------
+# The shelf and review lists NEVER ship the plaintext value — only value_masked.
+# Plaintext is handed out one field at a time by /reveal (the UI reveal-gate).
+
+def _mask_value(value):
+    """Same rule as jobs._mask; duplicated here to avoid importing the heavy jobs
+    module (pymupdf) into the api pod."""
+    alnum = sum(c.isalnum() for c in value)
+    if alnum <= 4:
+        return "•" * len(value)
+    seen, out = 0, []
+    for c in value:
+        if c.isalnum():
+            seen += 1
+            out.append(c if seen > alnum - 4 else "•")
+        else:
+            out.append(c)
+    return "".join(out)
+
+
+@app.get("/api/fields")
+def api_fields():
+    """Vault shelf: confirmed fields only, masked, newest-valid first per class."""
+    return _rows(
+        "SELECT id, document_id, entity_class, label, value_masked, expiry,"
+        " valid_from, score FROM field WHERE confirmed=true"
+        " ORDER BY entity_class, (expiry IS NULL), expiry DESC, created_at DESC")
+
+
+@app.get("/api/review")
+def api_review():
+    """Unconfirmed candidates awaiting confirm-once, highest confidence first."""
+    return _rows(
+        "SELECT f.id, f.document_id, f.entity_class, f.label, f.value_masked,"
+        " f.score, d.title FROM field f JOIN document d ON d.id=f.document_id"
+        " WHERE f.confirmed=false ORDER BY f.score DESC NULLS LAST, f.id DESC")
+
+
+@app.get("/api/doc/{doc_id}/fields")
+def api_doc_fields(doc_id: int):
+    return _rows(
+        "SELECT id, entity_class, label, value_masked, expiry, confirmed, score,"
+        " source FROM field WHERE document_id=%s ORDER BY confirmed DESC, score DESC",
+        (doc_id,))
+
+
+@app.post("/api/field/{field_id}/reveal")
+def api_field_reveal(field_id: int):
+    """Hand out the plaintext value for one field (the reveal-gate)."""
+    r = _one("SELECT value FROM field WHERE id=%s", (field_id,))
+    if not r:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return {"value": r["value"]}
+
+
+@app.post("/api/field/{field_id}/confirm")
+async def api_field_confirm(field_id: int, request: Request):
+    """Confirm a candidate onto the shelf; optional value/label/expiry overrides
+    (user correcting a mis-extracted number). source flips to 'user' on override."""
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 — empty body = plain confirm
+        pass
+    value = (body.get("value") or "").strip()
+    label = (body.get("label") or "").strip()
+    expiry = (body.get("expiry") or "").strip() or None
+    with db.connect() as c:
+        if value:
+            c.execute(
+                "UPDATE field SET confirmed=true, value=%s, value_masked=%s,"
+                " label=COALESCE(NULLIF(%s,''), label), expiry=%s, source='user'"
+                " WHERE id=%s",
+                (value, _mask_value(value), label, expiry, field_id))
+        else:
+            c.execute(
+                "UPDATE field SET confirmed=true,"
+                " label=COALESCE(NULLIF(%s,''), label),"
+                " expiry=COALESCE(%s, expiry) WHERE id=%s",
+                (label, expiry, field_id))
+    return {"ok": True}
+
+
+@app.post("/api/field/{field_id}/delete")
+def api_field_delete(field_id: int):
+    with db.connect() as c:
+        c.execute("DELETE FROM field WHERE id=%s", (field_id,))
+    return {"ok": True}
+
+
 _JOB_DOT = {"done": "ok", "failed": "warn", "running": "run", "pending": "idle"}
 
 _RULE_JS = """

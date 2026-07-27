@@ -106,6 +106,17 @@ CLASSIFY_MIN_CENTROID = int(os.environ.get("CLASSIFY_MIN_CENTROID", "2"))
 # the slow part on CPU (a 9-page doc = 10 encodes). Enable once search is wired.
 EMBED_PAGES = os.environ.get("EMBED_PAGES", "false").lower() in ("1", "true", "yes")
 
+# --- Field vault / PII extraction (Phase 8) ---------------------------------
+# Presidio analyzer (spaCy NER + pattern recognizers + validators) hosted in a
+# dedicated on-node pod. The `fields` stage calls it with a document's text and
+# stores the returned spans as candidate vault fields (unconfirmed). Local only —
+# no PII egress. See recognizers.py for the corpus-tuned custom patterns.
+PRESIDIO_URL = os.environ.get("PRESIDIO_URL", "http://presidio:8000")
+# Minimum extractor confidence to keep a candidate. Context-gated recognizers sit
+# low on their own and get a context boost near the right words; 0.4 keeps the
+# structured hits (USCIS receipt, SSN, card) and drops bare digit-run noise.
+FIELDS_SCORE_THRESHOLD = float(os.environ.get("FIELDS_SCORE_THRESHOLD", "0.4"))
+
 # --- Worker specialization --------------------------------------------------
 # Which job stages this worker process claims, and whether it scans the inbox /
 # polls Gmail. The default is an all-in-one worker; deployments split it:

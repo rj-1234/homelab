@@ -100,6 +100,7 @@ def _run_text(cur, doc_id):
     if has_text:
         status = "text_extracted"
         cur.execute("INSERT INTO job(document_id,stage) VALUES(%s,'embed')", (doc_id,))
+        cur.execute("INSERT INTO job(document_id,stage) VALUES(%s,'fields')", (doc_id,))
     elif mime == "application/pdf" or mime.startswith("image/"):
         status = "needs_ocr"           # scanned PDF / photo -> OCR stage
         cur.execute("INSERT INTO job(document_id,stage) VALUES(%s,'ocr')", (doc_id,))
@@ -141,6 +142,7 @@ def _run_ocr(cur, doc_id):
         )
     if any_text:
         cur.execute("INSERT INTO job(document_id,stage) VALUES(%s,'embed')", (doc_id,))
+        cur.execute("INSERT INTO job(document_id,stage) VALUES(%s,'fields')", (doc_id,))
     status = "text_extracted" if any_text else "ocr_failed"
     cur.execute("UPDATE document SET status=%s WHERE id=%s", (status, doc_id))
     return status
@@ -274,11 +276,74 @@ def _run_embed(cur, doc_id, pages=None):
     return "tagged:" + ",".join(sorted(tags))
 
 
+# --- field vault (PII extraction) -------------------------------------------
+def _presidio(text):
+    """Call the Presidio analyzer service; returns a list of PII spans."""
+    body = json.dumps({"text": text[:20000],
+                       "score_threshold": config.FIELDS_SCORE_THRESHOLD}).encode()
+    req = urllib.request.Request(
+        config.PRESIDIO_URL + "/analyze", body, {"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=300) as r:
+        return json.load(r)["entities"]
+
+
+def _mask(value):
+    """Precomputed display mask: reveal the last 4 alphanumerics, bullet the rest,
+    keep separators. Full value stays in `value` behind the reveal gate."""
+    alnum = sum(c.isalnum() for c in value)
+    if alnum <= 4:
+        return "•" * len(value)
+    seen, out = 0, []
+    for c in value:
+        if c.isalnum():
+            seen += 1
+            out.append(c if seen > alnum - 4 else "•")
+        else:
+            out.append(c)
+    return "".join(out)
+
+
+def _run_fields(cur, doc_id):
+    """Extract candidate vault fields (passport №, SSN, USCIS receipt, card, …)
+    from the document text via Presidio + custom recognizers. Candidates land
+    UNCONFIRMED; the user confirms once in the Review page. Re-running never
+    unconfirms an already-confirmed field (ON CONFLICT preserves `confirmed`)."""
+    from .recognizers import FIELD_ENTITIES, FIELD_LABELS, MASKED_ENTITIES
+    row = cur.execute(
+        "SELECT string_agg(text, E'\n' ORDER BY page_no) FROM page"
+        " WHERE document_id=%s", (doc_id,)).fetchone()
+    text = (row[0] if row else "") or ""
+    if not text.strip():
+        return "no_text"
+
+    best = {}
+    for e in _presidio(text):
+        cls = e["entity_type"]
+        val = (e.get("text") or "").strip()
+        if cls not in FIELD_ENTITIES or len(val) < 3:
+            continue
+        key = (cls, val)
+        if key not in best or e["score"] > best[key]["score"]:
+            best[key] = e
+
+    for (cls, val), e in best.items():
+        masked = _mask(val) if cls in MASKED_ENTITIES else val
+        cur.execute(
+            "INSERT INTO field(document_id,entity_class,label,value,value_masked,"
+            "score,source) VALUES(%s,%s,%s,%s,%s,%s,'presidio')"
+            " ON CONFLICT (document_id,entity_class,value) DO UPDATE SET"
+            " score=EXCLUDED.score, label=EXCLUDED.label,"
+            " value_masked=EXCLUDED.value_masked",
+            (doc_id, cls, FIELD_LABELS.get(cls, cls), val, masked, e["score"]))
+    return f"fields:{len(best)}"
+
+
 _STAGES = {
     "text": _run_text,
     "ocr": _run_ocr,
     "embed": _run_embed,
     "embed_pages": lambda cur, doc_id: _run_embed(cur, doc_id, pages=True),
+    "fields": _run_fields,
 }
 
 
