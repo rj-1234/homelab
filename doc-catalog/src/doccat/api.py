@@ -2,14 +2,18 @@
 
 Run: uvicorn doccat.api:app --host 0.0.0.0 --port 8000
 """
+import json
 import os
 import re
 import shutil
 import uuid
 from pathlib import Path
 
+import psycopg
 from fastapi import FastAPI, File, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               StreamingResponse)
 
 from . import classify, config, db, ui
 
@@ -457,6 +461,32 @@ def _status_data():
 @app.get("/api/status")
 def api_status():
     return _status_data()
+
+
+@app.get("/api/events")
+def api_events():
+    """Server-Sent Events: push the status snapshot whenever pipeline state
+    changes (Postgres LISTEN/NOTIFY, see migration 006), so the UI never polls.
+    A 15s heartbeat comment keeps proxies from closing an idle connection."""
+    def frame():
+        return f"data: {json.dumps(jsonable_encoder(_status_data()))}\n\n"
+
+    def gen():
+        conn = psycopg.connect(config.DATABASE_URL, autocommit=True)
+        try:
+            conn.execute("LISTEN doccat_events")
+            yield frame()                                       # initial snapshot
+            while True:
+                # blocks up to 15s; returns after the first NOTIFY (a burst of
+                # row changes collapses into one refresh)
+                changed = any(True for _ in conn.notifies(timeout=15, stop_after=1))
+                yield frame() if changed else ": ping\n\n"
+        finally:
+            conn.close()
+    return StreamingResponse(
+        gen(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                 "Connection": "keep-alive"})
 
 
 _JOB_DOT = {"done": "ok", "failed": "warn", "running": "run", "pending": "idle"}
