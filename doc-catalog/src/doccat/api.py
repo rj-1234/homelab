@@ -455,8 +455,12 @@ def _status_data():
     docs = _one("SELECT count(*) AS n FROM document"
                 " WHERE canonical_document_id IS NULL")
     fields = _one(
-        "SELECT count(*) FILTER (WHERE confirmed) AS confirmed,"
-        " count(*) FILTER (WHERE NOT confirmed) AS review FROM field")
+        "SELECT (SELECT count(*) FROM (SELECT DISTINCT entity_class, value"
+        "          FROM field WHERE confirmed) s) AS confirmed,"
+        " (SELECT count(*) FROM (SELECT DISTINCT entity_class, value FROM field f"
+        "   WHERE NOT confirmed AND NOT EXISTS (SELECT 1 FROM field c"
+        "     WHERE c.entity_class=f.entity_class AND c.value=f.value"
+        "     AND c.confirmed)) r) AS review")
     return {"accounts": accounts, "jobs": jobs, "sources": sources,
             "failures": failures, "documents": docs["n"] if docs else 0,
             "fields": {"confirmed": fields["confirmed"] if fields else 0,
@@ -516,20 +520,29 @@ def _mask_value(value):
 
 @app.get("/api/fields")
 def api_fields():
-    """Vault shelf: confirmed fields only, masked, newest-valid first per class."""
+    """Vault shelf: confirmed fields, deduped by (entity_class, value) so the same
+    value on multiple documents shows once; masked, newest-valid first per class."""
     return _rows(
-        "SELECT id, document_id, entity_class, label, value_masked, expiry,"
-        " valid_from, score FROM field WHERE confirmed=true"
-        " ORDER BY entity_class, (expiry IS NULL), expiry DESC, created_at DESC")
+        "SELECT * FROM (SELECT DISTINCT ON (entity_class, value)"
+        " id, document_id, entity_class, label, value_masked, expiry, valid_from, score"
+        " FROM field WHERE confirmed=true"
+        " ORDER BY entity_class, value, (expiry IS NULL), expiry DESC, created_at DESC) t"
+        " ORDER BY entity_class, (expiry IS NULL), expiry DESC")
 
 
 @app.get("/api/review")
 def api_review():
-    """Unconfirmed candidates awaiting confirm-once, highest confidence first."""
+    """Unconfirmed candidates, deduped by (entity_class, value) and hiding any value
+    already confirmed elsewhere — so you confirm each unique value once."""
     return _rows(
-        "SELECT f.id, f.document_id, f.entity_class, f.label, f.value_masked,"
-        " f.score, d.title FROM field f JOIN document d ON d.id=f.document_id"
-        " WHERE f.confirmed=false ORDER BY f.score DESC NULLS LAST, f.id DESC")
+        "SELECT * FROM (SELECT DISTINCT ON (f.entity_class, f.value)"
+        " f.id, f.document_id, f.entity_class, f.label, f.value_masked, f.score, d.title"
+        " FROM field f JOIN document d ON d.id=f.document_id"
+        " WHERE f.confirmed=false AND NOT EXISTS ("
+        "   SELECT 1 FROM field c WHERE c.entity_class=f.entity_class"
+        "   AND c.value=f.value AND c.confirmed)"
+        " ORDER BY f.entity_class, f.value, f.score DESC NULLS LAST) t"
+        " ORDER BY score DESC NULLS LAST, id DESC")
 
 
 @app.get("/api/doc/{doc_id}/fields")
@@ -569,18 +582,26 @@ async def api_field_confirm(field_id: int, request: Request):
                 " WHERE id=%s",
                 (value, _mask_value(value), label, expiry, field_id))
         else:
+            # plain confirm applies to every row sharing this (class, value) —
+            # the same number on other documents shouldn't come back in Review.
             c.execute(
                 "UPDATE field SET confirmed=true,"
                 " label=COALESCE(NULLIF(%s,''), label),"
-                " expiry=COALESCE(%s, expiry) WHERE id=%s",
+                " expiry=COALESCE(%s, expiry)"
+                " WHERE (entity_class, value) ="
+                "   (SELECT entity_class, value FROM field WHERE id=%s)",
                 (label, expiry, field_id))
     return {"ok": True}
 
 
 @app.post("/api/field/{field_id}/delete")
 def api_field_delete(field_id: int):
+    """Reject every row sharing this (class, value) — it's the same value, so it
+    shouldn't reappear from another document."""
     with db.connect() as c:
-        c.execute("DELETE FROM field WHERE id=%s", (field_id,))
+        c.execute(
+            "DELETE FROM field WHERE (entity_class, value) ="
+            " (SELECT entity_class, value FROM field WHERE id=%s)", (field_id,))
     return {"ok": True}
 
 
