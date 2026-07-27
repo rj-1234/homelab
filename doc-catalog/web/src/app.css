@@ -1,0 +1,75 @@
+/* Design tokens ported from the Python UI (doccat.ui STYLE) so the SPA keeps
+   the Registry identity: Space Grotesk / IBM Plex Sans / IBM Plex Mono, teal +
+   stamp-red, paper light and dark.
+   NOTE: fonts fall back to a system stack. To honor the corpus's no-public-egress
+   rule, self-host the woff2 files under static/fonts and @font-face them here
+   instead of a CDN import (follow-up). */
+
+:root {
+  --paper: #FBFAF7;
+  --card: #FFFFFF;
+  --ink: #1A1D1A;
+  --muted: #6B7169;
+  --teal: #0E7C6B;
+  --stamp: #B23A2E;
+  --blue: #2F6D8F;
+  --line: #E7E4DB;
+  --shadow: 0 1px 2px rgba(26, 29, 26, .05), 0 6px 20px rgba(26, 29, 26, .04);
+
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --radius: 10px;
+  --gap: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #14160F;
+    --card: #1C1F17;
+    --ink: #EDEBE0;
+    --muted: #9A9E90;
+    --teal: #4FBFA8;
+    --stamp: #E4796B;
+    --blue: #7FB4CE;
+    --line: #2C3025;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { font-family: var(--font-display); font-weight: 600; letter-spacing: -.01em; }
+
+a { color: var(--teal); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.mono { font-family: var(--font-mono); }
+.muted { color: var(--muted); }
+
+.wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 64px; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+/* keyboard focus stays visible */
+:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
