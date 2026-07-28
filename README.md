@@ -1,6 +1,7 @@
 # homelab — `cheeky-mini`
 
-Single-node **k3s** homelab running a Jellyfin media server plus a small
+Single-node **k3s** homelab running a Jellyfin media server, a personal
+**document + field vault** ([doc-catalog](doc-catalog/README.md)), and a small
 platform stack (dashboard, service hub, secure remote access). Built to grow:
 adding agent nodes later is a one-liner, and workloads that must stay on this
 box are already pinned with node labels/affinity.
@@ -49,6 +50,9 @@ flowchart TB
             home[Homepage :3000]
             head[Headlamp :80 - pinned ClusterIP]
         end
+        subgraph docs [namespace: docs]
+            vault[Field Vault - SvelteKit + Postgres]
+        end
         usb[(USB NTFS media - read-only)]
         zfs[(rpool ZFS - local-path PVCs)]
     end
@@ -60,7 +64,9 @@ flowchart TB
     cfd --> jelly
     phone --> ts
     ts -->|SSH + Headlamp https| head
+    ts -->|vault https :8091| vault
     ts -.-> jelly
+    vault --> zfs
     jelly --> usb
     jelly --> zfs
     home --> zfs
@@ -93,6 +99,7 @@ files; `*.example.yaml` templates are the only committed config stand-ins.
 | **Headlamp** | `platform` | tailnet-only (`tailscale serve`) | Cluster admin UI (successor to the archived k8s Dashboard). ClusterIP pinned `10.43.142.241` so the host-side `tailscale serve` target is stable. Login = `headlamp` ServiceAccount bearer token (cluster-admin, gated at the network layer). |
 | **Homepage** | `platform` | `home.ch33ky.org` (behind Access) | Central hub. Config is a ConfigMap seeded into a writable `emptyDir` by an initContainer (the image writes into its config dir on boot). Read-only RBAC for k8s service discovery. `HOMEPAGE_ALLOWED_HOSTS` must list every hostname it's served on. |
 | **cloudflared** | `platform` | — (outbound only) | 2 replicas for HA. Token from the `cloudflared-token` Secret; remotely-managed tunnel (routing in the CF dashboard). |
+| **Field Vault** (doc-catalog) | `docs` | tailnet-only (`tailscale serve :8091`) | Personal document + PII vault. Postgres-only pipeline (ingest → OCR → embed → tag → PII extract), FTS + pgvector hybrid search, Gmail ingest, Presidio field extraction. SvelteKit UI, realtime via SSE. All models on-node, **no public egress**. Own docs + manifests: [doc-catalog/](doc-catalog/README.md). |
 
 ---
 
@@ -108,6 +115,8 @@ cloudflare-tunnel/
   kubernetes/              cloudflared Deployment + values.example.yaml (token via Secret)
   Readme.md                tunnel setup + dashboard routing
 tailscale/README.md        host install + `tailscale serve` for Headlamp
+doc-catalog/               Personal document + field vault — own README, k8s in
+                           kubernetes/, Python pipeline in src/, SvelteKit web/
 ```
 
 Branches: **dev** = current k3s deployment · **archive/docker-legacy** =

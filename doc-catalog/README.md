@@ -12,7 +12,9 @@ broker. Queue = Postgres `SELECT … FOR UPDATE SKIP LOCKED`. Blobs =
 content-addressed files. Search = `tsvector` + `pgvector` in the same DB. Live UI
 updates = Postgres `LISTEN/NOTIFY` → SSE (no polling).
 
-> The catalog is evolving into a **personal field vault** — see
+> The catalog **is** a personal field vault: a SvelteKit UI over the corpus —
+> vault shelf (copy-ready fields), library with hybrid keyword/semantic search,
+> per-document detail, and a review queue. See
 > [VAULT_PLAN.md](VAULT_PLAN.md) for the design, security posture, IA and mockups.
 
 ## Core principles
@@ -69,10 +71,19 @@ flowchart LR
   (unconfirmed). Thin (HTTP to Presidio, no NLP libs).
 - **presidio** — Microsoft Presidio + spaCy on CPU behind `POST /analyze`. PII
   recognition on-node (no egress). Custom recognizers in `recognizers.py`.
-- **api** — FastAPI: JSON API (`/api/*`), the SSE push channel (`/api/events`), and
-  a legacy server-rendered "Registry" UI (being retired in favour of the SPA).
-- **web** — Caddy sidecar serving the SvelteKit static build and reverse-proxying
-  `/api` + SSE to the api pod. The decoupled, no-poll user-facing UI.
+- **api** — FastAPI JSON API (`/api/*`) + the SSE push channel (`/api/events`).
+  Hybrid search (`/api/documents?q=` — FTS `ts_rank` fused with pgvector cosine via
+  reciprocal-rank fusion), document detail/update/delete, stage re-runs, taxonomy,
+  and the field-vault endpoints. The old server-rendered HTML UI has been removed —
+  the SvelteKit SPA is the only UI.
+- **web** — Caddy sidecar serving the **SvelteKit** static build and reverse-
+  proxying `/api` + SSE to the api pod. Surfaces: **Vault** shelf (confirmed copy-
+  ready fields), **Library** (browse + hybrid keyword/semantic search + upload),
+  per-document **detail** (pipeline strip, stage re-runs, tag/manage, extracted
+  text, provenance, fields), **Review** queue, **Status**. "The Archive" design
+  system — self-hosted Newsreader + IBM Plex, SVG icons, a Graphite & Indigo
+  palette, and a persisted light/dark toggle. One SSE `EventSource` keeps every
+  page live (no polling).
 - **postgres** — `pgvector/pgvector:pg16`: blobs, documents, pages, chunks
   (`vector(768)` + HNSW), tags, jobs, accounts, provenance, fields.
 - **filebrowser** — drops files into `inbox/` for ingest.
@@ -141,7 +152,10 @@ encryption** — values are plaintext at rest (tailnet-only; see VAULT_PLAN.md).
 `migration 006/007` add statement-level `NOTIFY doccat_events` triggers on
 job/document/account/field. `GET /api/events` (FastAPI SSE) LISTENs and streams the
 status snapshot on any change, with a 15s heartbeat. The SvelteKit UI holds one
-`EventSource` — the job queue / shelf / Review badge update instantly.
+`EventSource` — the job queue / shelf / Review badge update instantly. The
+document-detail page reacts to the same stream, so a **Re-run OCR / text / embed**
+or **Save** flips its pipeline pill and refreshes tags, text and fields in place —
+no manual reload.
 
 ## Storage (`rpool/docs` ZFS dataset → `/srv/docs`)
 ```
@@ -186,7 +200,7 @@ reinstalls on restart. Rebuild the SPA (`cd web && npm run build`) after editing
 
 Expose tailnet-only (host, sudo — no public ingress per principle #5):
 ```bash
-sudo tailscale serve --bg --https=8092 http://10.43.200.33:8080   # Vault / SPA (web)
+sudo tailscale serve --bg --https=8091 http://10.43.200.33:8080   # Vault / SPA (web)
 sudo tailscale serve --bg --https=8090 http://10.43.200.31:8080   # FileBrowser
 ```
 
