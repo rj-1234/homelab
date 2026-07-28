@@ -22,10 +22,7 @@
 </script>
 
 <section>
-  <div class="head">
-    <h2>Pipeline</h2>
-    <span class="mono muted">{active} active</span>
-  </div>
+  <h2 class="eyebrow">Pipeline · {active} active</h2>
 
   <div class="grid">
     {#each STAGES as stage}
@@ -34,7 +31,8 @@
         <div class="pills">
           {#each STATES as st}
             {@const n = byStage[stage]?.[st] ?? 0}
-            <span class="pill {st}" class:zero={n === 0}>
+            <span class="pill {st} mono" class:zero={n === 0}>
+              <span class="dot" aria-hidden="true"></span>
               <span class="n">{n}</span>{st}
             </span>
           {/each}
@@ -58,28 +56,33 @@
 </section>
 
 <style>
-  .head { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 12px; }
-  .head h2 { margin: 0; font-size: 16px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--gap); }
-  .qcard { padding: 14px 16px; }
-  .stage { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 10px; }
+  .qcard { padding: var(--s-4); }
+  .stage {
+    font-size: var(--t-cap); text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin-bottom: var(--s-3);
+  }
   .pills { display: flex; flex-wrap: wrap; gap: 6px; }
   .pill {
     display: inline-flex; align-items: center; gap: 5px;
-    font-family: var(--font-mono); font-size: 11px; padding: 3px 8px;
-    border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
+    font-size: 0.6875rem; padding: 3px 9px 3px 7px;
+    border-radius: var(--radius-pill); border: 1px solid var(--line); color: var(--muted);
   }
   .pill .n { font-weight: 600; color: var(--ink); }
-  .pill.zero { opacity: .38; }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); flex: none; }
+  .pill.zero { opacity: 0.4; }
   .pill.running:not(.zero) { border-color: var(--teal); color: var(--teal); }
   .pill.running:not(.zero) .n { color: var(--teal); }
+  .pill.running .dot { background: var(--teal); }
+  .pill.pending .dot { background: var(--muted); }
   .pill.failed:not(.zero) { border-color: var(--stamp); color: var(--stamp); }
   .pill.failed:not(.zero) .n { color: var(--stamp); }
+  .pill.failed .dot { background: var(--stamp); }
   .pill.done:not(.zero) .n { color: var(--blue); }
+  .pill.done .dot { background: var(--faint); }
 
-  .fails { margin-top: var(--gap); padding: 12px 16px; }
-  .failrow { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); }
+  .fails { margin-top: var(--gap); padding: var(--s-3) var(--s-4); }
+  .failrow { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) 0; border-top: 1px solid var(--line); }
   .failrow:first-of-type { border-top: none; }
   .ftitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .stamp { color: var(--stamp); }
 </style>

@@ -13,8 +13,30 @@ const post = (path, body) =>
     body: body ? JSON.stringify(body) : undefined
   });
 
-export const listDocuments = (q = '') =>
-  j(`/api/documents${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+export const listDocuments = ({ q = '', status = '', tag = '' } = {}) => {
+  const p = new URLSearchParams();
+  if (q) p.set('q', q);
+  if (status) p.set('status', status);
+  if (tag) p.set('tag', tag);
+  const qs = p.toString();
+  return j(`/api/documents${qs ? `?${qs}` : ''}`);
+};
+
+export const getDoc = (id) => j(`/api/doc/${id}`);
+export const listTags = () => j('/api/tags');
+
+export const updateDoc = (id, patch) => post(`/api/doc/${id}`, patch);
+export const reprocessDoc = (id, stage) => post(`/api/doc/${id}/reprocess`, { stage });
+export const deleteDoc = (id) => post(`/api/doc/${id}/delete`);
+export const getTaxonomy = () => j('/api/taxonomy');
+export const listSenderRules = () => j('/api/sender-rules');
+export const addSenderRule = (rule) => post('/api/sender-rule', rule);
+export const delSenderRule = (rule) => post('/api/sender-rule/delete', rule);
+export const uploadFiles = (fileList) => {
+  const fd = new FormData();
+  for (const f of fileList) fd.append('files', f);
+  return j('/api/upload', { method: 'POST', body: fd });
+};
 
 // --- field vault ---
 export const listFields = () => j('/api/fields');

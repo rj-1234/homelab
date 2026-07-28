@@ -1,64 +1,232 @@
-/* Design tokens ported from the Python UI (doccat.ui STYLE) so the SPA keeps
-   the Registry identity: Space Grotesk / IBM Plex Sans / IBM Plex Mono, teal +
-   stamp-red, paper light and dark.
-   NOTE: fonts fall back to a system stack. To honor the corpus's no-public-egress
-   rule, self-host the woff2 files under static/fonts and @font-face them here
-   instead of a CDN import (follow-up). */
+/* ============================================================================
+   Field Vault — "The Archive" design system
+   Editorial serif display (Newsreader, optical-sized) over a warm archival paper,
+   with IBM Plex Sans for chrome and IBM Plex Mono for the data (the numbers you
+   came here to copy). Secure-pine + oxblood-stamp accents carry meaning:
+   pine = your vault / confirmed, oxblood = review / danger, ink-blue = documents.
+
+   Fonts are SELF-HOSTED (static/fonts/*.woff2, latin subset) and served from the
+   same origin — the corpus never makes a public font request. Token names from
+   the previous system are preserved so components keep working while they adopt
+   the richer scale.
+   ========================================================================== */
+
+/* --- typefaces (self-hosted, latin) --------------------------------------- */
+@font-face {
+  font-family: 'Newsreader'; font-style: normal; font-weight: 400;
+  font-display: swap; src: url('/fonts/Newsreader-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Newsreader'; font-style: normal; font-weight: 500;
+  font-display: swap; src: url('/fonts/Newsreader-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Newsreader'; font-style: normal; font-weight: 600;
+  font-display: swap; src: url('/fonts/Newsreader-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Newsreader'; font-style: italic; font-weight: 400;
+  font-display: swap; src: url('/fonts/Newsreader-400italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Plex Sans'; font-style: normal; font-weight: 400;
+  font-display: swap; src: url('/fonts/IBMPlexSans-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Plex Sans'; font-style: normal; font-weight: 500;
+  font-display: swap; src: url('/fonts/IBMPlexSans-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Plex Sans'; font-style: normal; font-weight: 600;
+  font-display: swap; src: url('/fonts/IBMPlexSans-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Plex Mono'; font-style: normal; font-weight: 400;
+  font-display: swap; src: url('/fonts/IBMPlexMono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Plex Mono'; font-style: normal; font-weight: 500;
+  font-display: swap; src: url('/fonts/IBMPlexMono-500.woff2') format('woff2');
+}
 
 :root {
-  --paper: #FBFAF7;
-  --card: #FFFFFF;
-  --ink: #1A1D1A;
-  --muted: #6B7169;
-  --teal: #0E7C6B;
-  --stamp: #B23A2E;
-  --blue: #2F6D8F;
-  --line: #E7E4DB;
-  --shadow: 0 1px 2px rgba(26, 29, 26, .05), 0 6px 20px rgba(26, 29, 26, .04);
+  color-scheme: light;
 
-  --font-display: 'Space Grotesk', system-ui, sans-serif;
-  --font-body: 'IBM Plex Sans', system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* paper & ink — cool graphite neutrals, high text contrast */
+  --paper:   #F7F7FA;
+  --paper-2: #EEEEF4;   /* recessed wells, hovers */
+  --card:    #FFFFFF;
+  --ink:     #14141B;   /* cool near-black (~15:1 on paper) */
+  --ink-2:   #3C3C48;   /* secondary text */
+  --muted:   #61616E;   /* labels, meta (>=4.6:1 on paper) */
+  --faint:   #9A9AA8;   /* de-emphasised */
+  --line:    #E4E4EC;   /* hairline */
+  --line-2:  #EFEFF4;   /* softest divider */
 
-  --radius: 10px;
+  /* accents — fixed meanings. Legacy token names are kept so components need no
+     edits: --teal now carries INDIGO (vault), --blue carries CYAN (documents),
+     --stamp carries ROSE (review / danger). */
+  --pine:    #5B54E6;
+  --teal:    #5B54E6;   /* vault / fields / confirmed / primary (indigo) */
+  --teal-ink:#4A43D6;   /* pressed */
+  --blue:    #0E7E96;   /* documents (cyan, darkened for text contrast) */
+  --stamp:   #D83A44;   /* review / danger (rose) */
+  --gold:    #9A7B29;   /* rare highlight (expiry watch, seal) */
+
+  /* tints (used with color-mix at call sites too) */
+  --teal-wash:  color-mix(in srgb, var(--teal) 9%, var(--card));
+  --blue-wash:  color-mix(in srgb, var(--blue) 9%, var(--card));
+  --stamp-wash: color-mix(in srgb, var(--stamp) 8%, var(--card));
+
+  /* type */
+  --font-display: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --font-body:    'Plex Sans', system-ui, -apple-system, sans-serif;
+  --font-mono:    'Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* modular type scale (~1.25) */
+  --t-cap:  0.75rem;    /* 12 — eyebrows/labels */
+  --t-sm:   0.8125rem;  /* 13 — meta, mono data */
+  --t-0:    0.9375rem;  /* 15 — body */
+  --t-1:    1.0625rem;  /* 17 */
+  --t-2:    1.375rem;   /* 22 */
+  --t-3:    1.75rem;    /* 28 */
+  --t-4:    2.375rem;   /* 38 — page display */
+
+  /* spacing rhythm */
+  --s-1: 4px;  --s-2: 8px;  --s-3: 12px; --s-4: 16px;
+  --s-5: 24px; --s-6: 32px; --s-7: 48px; --s-8: 64px;
   --gap: 16px;
+
+  /* form */
+  --radius:    12px;
+  --radius-sm: 8px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
+
+  /* elevation — cool graphite, layered, restrained */
+  --shadow:    0 1px 2px rgba(18, 18, 32, .05), 0 4px 14px rgba(18, 18, 32, .06);
+  --shadow-lg: 0 2px 6px rgba(18, 18, 32, .08), 0 18px 40px rgba(18, 18, 32, .12);
+  --ring: color-mix(in srgb, var(--teal) 60%, transparent);
 }
 
+/* --- dark theme -----------------------------------------------------------
+   Applied when the OS is dark AND the user hasn't pinned light, OR whenever the
+   user pins dark. Both selectors carry identical tokens because a media query
+   and a plain attribute selector can't be merged into one rule. The data-theme
+   attribute is set by the no-flash script in app.html and kept in sync by
+   theme.js. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #14160F;
-    --card: #1C1F17;
-    --ink: #EDEBE0;
-    --muted: #9A9E90;
-    --teal: #4FBFA8;
-    --stamp: #E4796B;
-    --blue: #7FB4CE;
-    --line: #2C3025;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --paper:   #0E0E14;
+    --paper-2: #17171F;
+    --card:    #1A1A23;
+    --ink:     #ECECF2;
+    --ink-2:   #C4C4CE;
+    --muted:   #9A9AA8;
+    --faint:   #66666F;
+    --line:    #2A2A36;
+    --line-2:  #22222D;
+
+    --pine:    #8B84FF;
+    --teal:    #8B84FF;
+    --teal-ink:#A29CFF;
+    --blue:    #22D3EE;
+    --stamp:   #F4796F;
+    --gold:    #D6B25C;
+
+    --teal-wash:  color-mix(in srgb, var(--teal) 16%, var(--card));
+    --blue-wash:  color-mix(in srgb, var(--blue) 15%, var(--card));
+    --stamp-wash: color-mix(in srgb, var(--stamp) 15%, var(--card));
+
+    --shadow:    0 1px 2px rgba(0, 0, 0, .40), 0 6px 18px rgba(0, 0, 0, .34);
+    --shadow-lg: 0 2px 8px rgba(0, 0, 0, .46), 0 20px 44px rgba(0, 0, 0, .42);
   }
 }
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --paper:   #0E0E14;
+  --paper-2: #17171F;
+  --card:    #1A1A23;
+  --ink:     #ECECF2;
+  --ink-2:   #C4C4CE;
+  --muted:   #9A9AA8;
+  --faint:   #66666F;
+  --line:    #2A2A36;
+  --line-2:  #22222D;
 
-* { box-sizing: border-box; }
+  --pine:    #8B84FF;
+  --teal:    #8B84FF;
+  --teal-ink:#A29CFF;
+  --blue:    #22D3EE;
+  --stamp:   #F4796F;
+  --gold:    #D6B25C;
 
-html, body {
+  --teal-wash:  color-mix(in srgb, var(--teal) 16%, var(--card));
+  --blue-wash:  color-mix(in srgb, var(--blue) 15%, var(--card));
+  --stamp-wash: color-mix(in srgb, var(--stamp) 15%, var(--card));
+
+  --shadow:    0 1px 2px rgba(0, 0, 0, .40), 0 6px 18px rgba(0, 0, 0, .34);
+  --shadow-lg: 0 2px 8px rgba(0, 0, 0, .46), 0 20px 44px rgba(0, 0, 0, .42);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-body);
-  font-size: 15px;
-  line-height: 1.5;
+  font-size: var(--t-0);
+  line-height: 1.55;
+  font-optical-sizing: auto;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* faint archival grain so the paper reads as stock, not flat #fff */
+  background-image:
+    radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--teal) 5%, transparent), transparent 42%),
+    radial-gradient(circle at 88% 6%, color-mix(in srgb, var(--stamp) 4%, transparent), transparent 38%);
+  background-attachment: fixed;
 }
 
-h1, h2, h3 { font-family: var(--font-display); font-weight: 600; letter-spacing: -.01em; }
+/* display face is optical-sized; tighten and let it carry the personality */
+h1, h2, h3 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  line-height: 1.12;
+  letter-spacing: -0.012em;
+  color: var(--ink);
+  margin: 0;
+}
+h1 { font-size: var(--t-4); font-weight: 500; letter-spacing: -0.02em; }
+h2 { font-size: var(--t-2); }
+h3 { font-size: var(--t-1); }
+
+p { margin: 0 0 var(--s-4); }
 
 a { color: var(--teal); text-decoration: none; }
-a:hover { text-decoration: underline; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
 
-.mono { font-family: var(--font-mono); }
+.mono { font-family: var(--font-mono); font-feature-settings: 'zero' 1; }
 .muted { color: var(--muted); }
+.stamp { color: var(--stamp); }
 
-.wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 64px; }
+/* eyebrow — the recurring editorial label: mono, spaced, with a lead rule */
+.eyebrow {
+  display: flex; align-items: center; gap: var(--s-3);
+  font-family: var(--font-mono); font-size: var(--t-cap); font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted);
+  margin: 0 0 var(--s-3);
+}
+.eyebrow::after {
+  content: ""; flex: 1; height: 1px;
+  background: linear-gradient(90deg, var(--line), transparent);
+}
+
+.wrap { max-width: 1040px; margin: 0 auto; padding: var(--s-6) var(--s-5) var(--s-8); }
+@media (max-width: 560px) { .wrap { padding: var(--s-5) var(--s-4) var(--s-7); } }
 
 .card {
   background: var(--card);
@@ -67,9 +235,31 @@ a:hover { text-decoration: underline; }
   box-shadow: var(--shadow);
 }
 
-/* keyboard focus stays visible */
-:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+/* buttons — quiet, tactile, meaning by color */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s-2);
+  min-height: 40px; padding: 0 var(--s-4);
+  font-family: var(--font-body); font-size: var(--t-sm); font-weight: 500;
+  border: 1px solid transparent; border-radius: var(--radius-pill);
+  cursor: pointer; background: var(--teal); color: #fff;
+  transition: filter .16s ease, background .16s ease, border-color .16s ease, transform .06s ease;
+}
+.btn:hover { filter: brightness(1.06); text-decoration: none; }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: .55; cursor: default; filter: none; }
+.btn.ghost { background: var(--card); color: var(--ink); border-color: var(--line); }
+.btn.ghost:hover { border-color: var(--teal); filter: none; background: var(--teal-wash); }
+.btn.danger { background: var(--card); color: var(--stamp); border-color: color-mix(in srgb, var(--stamp) 40%, var(--line)); }
+.btn.danger:hover { background: var(--stamp-wash); border-color: var(--stamp); filter: none; }
+
+/* keyboard focus stays crisp and on-brand */
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
+
+/* svg icons inherit text color and align to the type */
+svg.i { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; flex: none; }
+
+::selection { background: color-mix(in srgb, var(--teal) 26%, transparent); }
 
 @media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; }
+  * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }

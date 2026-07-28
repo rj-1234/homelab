@@ -3,6 +3,7 @@
   import { listReview } from '$lib/api.js';
   import { intoGroups } from '$lib/fields.js';
   import ReviewRow from '$lib/ReviewRow.svelte';
+  import Icon from '$lib/Icon.svelte';
 
   let rows = $state([]);
   let loading = $state(true);
@@ -37,13 +38,14 @@
     <p class="stamp">{error}</p>
   {:else if rows.length === 0}
     <div class="empty card">
+      <span class="empty-ic"><Icon name="check-circle" size="26px" stroke={1.5} /></span>
       <h2>Nothing to review</h2>
       <p class="muted">Every extracted field has been handled. <a href="/">Back to the vault →</a></p>
     </div>
   {:else}
     {#each groups as g}
       <section class="group">
-        <h2 class="gtitle mono">{g.title} · {g.fields.length}</h2>
+        <h2 class="eyebrow">{g.title} · {g.fields.length}</h2>
         <div class="card list">
           {#each g.fields as r (r.id)}
             <ReviewRow row={r} ondone={done} />
@@ -55,14 +57,17 @@
 </main>
 
 <style>
-  .head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px; }
-  .head h1 { margin: 0; font-size: 22px; }
-  .intro { max-width: 66ch; margin: 0 0 24px; font-size: 13px; }
+  .head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: var(--s-1); }
+  .intro { max-width: 66ch; margin: 0 0 var(--s-6); font-size: var(--t-sm); }
 
-  .group { margin-bottom: 24px; }
-  .gtitle { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 10px; font-weight: 500; }
+  .group { margin-bottom: var(--s-6); }
   .list { overflow: hidden; }
 
-  .empty { padding: 36px 24px; text-align: center; }
-  .empty h2 { margin: 0 0 8px; font-size: 18px; }
+  .empty { padding: var(--s-7) var(--s-5); text-align: center; }
+  .empty-ic {
+    display: inline-grid; place-items: center; width: 56px; height: 56px;
+    border-radius: 50%; margin: 0 auto var(--s-4);
+    background: var(--teal-wash); color: var(--teal);
+  }
+  .empty h2 { margin: 0 0 var(--s-2); }
 </style>
