@@ -6,13 +6,14 @@ import json
 import os
 import re
 import shutil
+import urllib.request
 import uuid
 from pathlib import Path
 
 import psycopg
 from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+from fastapi.responses import (FileResponse, JSONResponse,
                                StreamingResponse)
 
 from . import classify, config, db, ui
@@ -40,6 +41,84 @@ def _one(sql, args=()):
     return r[0] if r else None
 
 
+def _embed_query(text):
+    """Embed a search query via the embedder microservice. Raises on failure."""
+    body = json.dumps({"texts": [text], "is_query": True}).encode()
+    req = urllib.request.Request(
+        config.EMBEDDER_URL + "/embed", body, {"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)["vectors"][0]
+
+
+def _hybrid_search(q, limit=60):
+    """Keyword (FTS) + semantic (pgvector) search fused with Reciprocal Rank
+    Fusion (RRF, k=60). Falls back to FTS-only if the embedder is unreachable.
+    Returns document rows (same shape as the browse list) plus `score` and a
+    `snippet` FTS headline."""
+    hl = ("'StartSel=@@HL@@, StopSel=@@EHL@@, MaxFragments=1, MinWords=4,"
+          " MaxWords=16, FragmentDelimiter= … '")
+    try:
+        vec = _embed_query(q)
+        vec_lit = "[" + ",".join(f"{x:.7f}" for x in vec) + "]"
+    except Exception:
+        vec_lit = None
+
+    if vec_lit is not None:
+        sql = f"""
+        WITH kw AS (
+          SELECT d.id AS doc_id,
+                 row_number() OVER (
+                   ORDER BY max(ts_rank(p.tsv, plainto_tsquery('english', %s))) DESC
+                 ) AS rnk
+          FROM page p JOIN document d ON d.id=p.document_id
+          WHERE p.tsv @@ plainto_tsquery('english', %s)
+            AND d.canonical_document_id IS NULL
+          GROUP BY d.id
+          LIMIT 80
+        ),
+        sem AS (
+          SELECT c.document_id AS doc_id,
+                 row_number() OVER (ORDER BY min(c.embedding <=> %s::vector)) AS rnk
+          FROM chunk c JOIN document d ON d.id=c.document_id
+          WHERE c.embedding IS NOT NULL AND d.canonical_document_id IS NULL
+          GROUP BY c.document_id
+          LIMIT 80
+        ),
+        fused AS (
+          SELECT COALESCE(kw.doc_id, sem.doc_id) AS doc_id,
+                 COALESCE(1.0/(60+kw.rnk), 0) + COALESCE(1.0/(60+sem.rnk), 0) AS score
+          FROM kw FULL OUTER JOIN sem ON kw.doc_id = sem.doc_id
+        )
+        SELECT {_DOC_COLS}, f.score,
+          (SELECT ts_headline('english', p.text,
+                    plainto_tsquery('english', %s), {hl})
+           FROM page p WHERE p.document_id=d.id
+           ORDER BY ts_rank(p.tsv, plainto_tsquery('english', %s)) DESC
+           LIMIT 1) AS snippet
+        FROM fused f
+        JOIN document d ON d.id=f.doc_id
+        JOIN blob b ON b.sha256=d.primary_blob_sha
+        ORDER BY f.score DESC
+        LIMIT %s
+        """
+        return _rows(sql, (q, q, vec_lit, q, q, limit))
+
+    # FTS-only fallback
+    sql = f"""
+    SELECT * FROM (
+      SELECT DISTINCT ON (d.id) {_DOC_COLS},
+        ts_rank(p.tsv, plainto_tsquery('english', %s)) AS score,
+        ts_headline('english', p.text, plainto_tsquery('english', %s), {hl}) AS snippet
+      FROM page p JOIN document d ON d.id=p.document_id
+      JOIN blob b ON b.sha256=d.primary_blob_sha
+      WHERE p.tsv @@ plainto_tsquery('english', %s)
+        AND d.canonical_document_id IS NULL
+      ORDER BY d.id, score DESC
+    ) s ORDER BY score DESC LIMIT %s
+    """
+    return _rows(sql, (q, q, q, limit))
+
+
 # --- health + JSON -----------------------------------------------------------
 @app.get("/healthz")
 def healthz():
@@ -49,11 +128,81 @@ def healthz():
 
 
 @app.get("/api/documents")
-def api_documents():
+def api_documents(q: str = "", status: str = "", tag: str = ""):
+    if q.strip():
+        return _hybrid_search(q.strip())
+    where = "WHERE d.canonical_document_id IS NULL"
+    args = []
+    if status:
+        where += " AND d.status=%s"; args.append(status)
+    if tag:
+        where += (" AND EXISTS (SELECT 1 FROM document_tag dt JOIN tag t"
+                  " ON t.id=dt.tag_id WHERE dt.document_id=d.id AND t.name=%s)")
+        args.append(tag)
     return _rows(
         f"SELECT {_DOC_COLS} FROM document d JOIN blob b ON b.sha256=d.primary_blob_sha"
-        " WHERE d.canonical_document_id IS NULL ORDER BY d.created_at DESC LIMIT 500"
+        f" {where} ORDER BY d.created_at DESC LIMIT 500",
+        tuple(args),
     )
+
+
+@app.get("/api/doc/{doc_id}")
+def api_doc(doc_id: int):
+    d = _one(
+        f"SELECT {_DOC_COLS} FROM document d JOIN blob b ON b.sha256=d.primary_blob_sha"
+        " WHERE d.id=%s", (doc_id,))
+    if not d:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    prov = _rows(
+        "SELECT source, source_ref, sender, subject, received_at, created_at"
+        " FROM source_event WHERE blob_sha=%s ORDER BY created_at", (d["sha"],))
+    pages = _rows(
+        "SELECT page_no, engine, text FROM page WHERE document_id=%s ORDER BY page_no",
+        (doc_id,))
+    fc = _one(
+        "SELECT count(*) FILTER (WHERE confirmed) AS confirmed,"
+        " count(*) FILTER (WHERE NOT confirmed) AS review"
+        " FROM field WHERE document_id=%s", (doc_id,))
+    jobs = _rows("SELECT stage, state FROM job WHERE document_id=%s ORDER BY id", (doc_id,))
+    return {"doc": d, "provenance": prov, "pages": pages,
+            "fields": fc or {"confirmed": 0, "review": 0}, "jobs": jobs}
+
+
+@app.get("/api/doc/{doc_id}/raw")
+def api_raw(doc_id: int):
+    d = _one("SELECT b.path, b.mime, d.title FROM document d"
+             " JOIN blob b ON b.sha256=d.primary_blob_sha WHERE d.id=%s", (doc_id,))
+    if not d or not Path(d["path"]).exists():
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return FileResponse(d["path"], media_type=d["mime"],
+        headers={"Content-Disposition": f'inline; filename="{d["title"]}"'})
+
+
+@app.get("/api/tags")
+def api_tags():
+    return _rows(
+        "SELECT t.name, count(*) AS n FROM tag t"
+        " JOIN document_tag dt ON dt.tag_id=t.id"
+        " JOIN document d ON d.id=dt.document_id"
+        " WHERE d.canonical_document_id IS NULL"
+        " GROUP BY t.name ORDER BY n DESC LIMIT 40")
+
+
+@app.get("/api/taxonomy")
+def api_taxonomy():
+    return {
+        "tags": [{"category": cat, "subtags": subs}
+                 for cat, subs in classify.taxonomy_tags()],
+        "statuses": [{"key": k, "label": v[0]} for k, v in ui.STATUS.items()],
+    }
+
+
+@app.get("/api/sender-rules")
+def api_sender_rules():
+    return _rows(
+        "SELECT sr.account_id, a.email, sr.pattern, sr.action"
+        " FROM sender_rule sr JOIN account a ON a.id=sr.account_id"
+        " ORDER BY a.email, sr.action, sr.pattern")
 
 
 @app.get("/api/search")
@@ -69,294 +218,7 @@ def api_search(q: str):
     )
 
 
-# --- browse + search (HTML) --------------------------------------------------
-def _rail(active_status, active_tag):
-    counts = _rows(
-        "SELECT status, count(*) n FROM document WHERE canonical_document_id IS NULL"
-        " GROUP BY status ORDER BY n DESC"
-    )
-    tags = _rows(
-        "SELECT t.name, count(*) n FROM tag t JOIN document_tag dt ON dt.tag_id=t.id"
-        " GROUP BY t.name ORDER BY n DESC LIMIT 30"
-    )
-    total = sum(c["n"] for c in counts)
-    st = [f"<a class='{'on' if not active_status else ''}' href='/'>"
-          f"All<span class=n>{total}</span></a>"]
-    for c in counts:
-        label = ui.status_bits(c["status"])[0]
-        on = "on" if active_status == c["status"] else ""
-        st.append(f"<a class='{on}' href='/?status={ui.esc(c['status'])}'>"
-                  f"{ui.esc(label)}<span class=n>{c['n']}</span></a>")
-    tg = "".join(
-        f"<a class='{'on' if active_tag==t['name'] else ''}' href='/?tag={ui.esc(t['name'])}'>"
-        f"{ui.esc(t['name'])}<span class=n>{t['n']}</span></a>" for t in tags
-    )
-    tag_block = f"<div><p class=eyebrow>Tags</p>{tg}</div>" if tags else ""
-    return (
-        "<nav class=rail>"
-        f"<div><p class=eyebrow>Status</p>{''.join(st)}</div>"
-        f"{tag_block}</nav>"
-    )
-
-
-@app.get("/", response_class=HTMLResponse)
-def index(q: str = "", status: str = "", tag: str = ""):
-    if q:
-        docs = _rows(
-            "SELECT * FROM ("
-            f" SELECT DISTINCT ON (d.id) {_DOC_COLS},"
-            "   ts_rank(p.tsv, plainto_tsquery('english', %s)) AS rank,"
-            "   ts_headline('english', p.text, plainto_tsquery('english', %s),"
-            "     'StartSel=@@HL@@, StopSel=@@EHL@@, MaxFragments=2, MinWords=5,"
-            "      MaxWords=18, FragmentDelimiter= … ') AS snippet"
-            " FROM page p JOIN document d ON d.id=p.document_id"
-            " JOIN blob b ON b.sha256=d.primary_blob_sha"
-            " WHERE p.tsv @@ plainto_tsquery('english', %s)"
-            " AND d.canonical_document_id IS NULL ORDER BY d.id, rank DESC"
-            ") s ORDER BY rank DESC LIMIT 100",
-            (q, q, q),
-        )
-        heading = f"Search · {ui.esc(q)}"
-    else:
-        where = "WHERE d.canonical_document_id IS NULL"
-        args = []
-        if status:
-            where += " AND d.status=%s"; args.append(status)
-        if tag:
-            where += (" AND EXISTS (SELECT 1 FROM document_tag dt JOIN tag t"
-                      " ON t.id=dt.tag_id WHERE dt.document_id=d.id AND t.name=%s)")
-            args.append(tag)
-        docs = _rows(
-            f"SELECT {_DOC_COLS} FROM document d JOIN blob b ON b.sha256=d.primary_blob_sha"
-            f" {where} ORDER BY d.created_at DESC LIMIT 500",
-            tuple(args),
-        )
-        heading = ui.status_bits(status)[0] if status else (f"Tag · {ui.esc(tag)}" if tag else "All documents")
-
-    if docs:
-        cards = "<div class=stack>" + "".join(ui.card(d) for d in docs) + "</div>"
-    else:
-        cards = ("<div class=empty><b>Nothing here yet</b>"
-                 "Use <b>Add document</b> up top — it lands in the catalog within a minute.</div>"
-                 if not (q or status or tag) else
-                 "<div class=empty><b>No matches</b>Try a different term or clear the filter.</div>")
-
-    body = (
-        "<div class=wrap>"
-        + _rail(status, tag)
-        + "<main><div class=titlerow><div>"
-        + f"<h1 class=title>{heading}</h1>"
-        + f"<span class=count>{len(docs)} document{'s' if len(docs)!=1 else ''}</span></div>"
-        + ui.autoref() + "</div>"
-        + cards + "</main></div>"
-    )
-    return ui.shell(heading, body, q)
-
-
 # --- detail + manage ---------------------------------------------------------
-@app.get("/doc/{doc_id}", response_class=HTMLResponse)
-def detail(doc_id: int):
-    d = _one(
-        f"SELECT {_DOC_COLS}, b.size FROM document d JOIN blob b ON b.sha256=d.primary_blob_sha"
-        " WHERE d.id=%s", (doc_id,),
-    )
-    if not d:
-        return HTMLResponse(ui.shell("Not found",
-            "<div class=wrap><main><div class=empty><b>No such document</b>"
-            "<a href=/>Back to the catalog</a></div></main></div>"), status_code=404)
-
-    prov = _rows("SELECT source, source_ref, sender, subject, received_at, created_at"
-                 " FROM source_event WHERE blob_sha=%s ORDER BY created_at", (d["sha"],))
-    pages = _rows("SELECT page_no, engine, text FROM page WHERE document_id=%s ORDER BY page_no",
-                  (doc_id,))
-    label, cls = ui.status_bits(d["status"])
-    accounts = {a["id"]: a["email"] for a in
-                _rows("SELECT id, email FROM account WHERE provider='gmail'")}
-
-    def _prov_li(p):
-        when = (p["received_at"] or p["created_at"]).strftime("%Y-%m-%d %H:%M")
-        src = p["source"]
-        bits = [f"<span class='src {ui.esc(src)}'>{ui.esc(src)}</span>"]
-        if src == "gmail":
-            # source_ref = gmail:<account_id>:<message_id>:<part_id>
-            parts = (p["source_ref"] or "").split(":")
-            acct = accounts.get(int(parts[1])) if len(parts) > 1 and parts[1].isdigit() else None
-            if acct:
-                bits.append(f"<span class=to>to {ui.esc(acct)}</span>")
-            if p["sender"]:
-                bits.append(f"<span class=frm>from {ui.esc(p['sender'])}</span>")
-            if p["subject"]:
-                bits.append(f"<span class=subj>“{ui.esc(p['subject'])}”</span>")
-        else:
-            bits.append(f"<span class=mono>{ui.esc(p['source_ref'])}</span>")
-        return (f"<li><span class=when>{when}</span>"
-                f"<span class=pv>{''.join(bits)}</span></li>")
-
-    prov_html = "".join(_prov_li(p) for p in prov)
-    pages_html = "".join(
-        f"<details class=page {'open' if p['page_no']==1 else ''}>"
-        f"<summary>Page {p['page_no']} · {ui.esc(p['engine'] or '—')} · {len(p['text'] or '')} chars</summary>"
-        f"<pre>{ui.esc(p['text']) or '<em>no text</em>'}</pre></details>"
-        for p in pages
-    ) or "<p class=count>No text extracted yet.</p>"
-
-    opts = "".join(
-        f"<option value='{k}' {'selected' if d['status']==k else ''}>{v[0]}</option>"
-        for k, v in ui.STATUS.items()
-    )
-
-    # --- pipeline stage strip: which stage each doc is at, or Done ------------
-    jobs_for = _rows("SELECT stage, state FROM job WHERE document_id=%s", (doc_id,))
-    active = {j["stage"] for j in jobs_for if j["state"] in ("pending", "running")}
-    ocr_pages = any((p["engine"] or "") in ("paddleocr", "rapidocr", "claude-vision") for p in pages)
-
-    def _pstate(stage, done):
-        return "active" if stage in active else ("done" if done else "todo")
-
-    text_done = bool(pages) or d["status"] in ("text_extracted", "tagged", "no_text", "ocr_failed")
-    ocr_applies = ("ocr" in active) or ocr_pages or d["status"] in ("needs_ocr", "ocr_failed")
-    all_done = d["status"] == "tagged" and not active
-    pchips = [f"<span class='pstage {_pstate('text', text_done)}'>text</span>"]
-    if ocr_applies:
-        pchips.append(f"<span class='pstage {_pstate('ocr', ocr_pages)}'>ocr</span>")
-    pchips.append(f"<span class='pstage {_pstate('embed', d['status']=='tagged')}'>embed</span>")
-    pipeline = ("<div class=pipeline>" + "".join(pchips)
-                + ("<span class=pdone>✓ Done</span>" if all_done else "") + "</div>")
-
-    # --- tags ----------------------------------------------------------------
-    applied = set(d["tags"] or [])
-    tax = classify.taxonomy_tags()
-    known = {c for c, _ in tax} | {s for _, ss in tax for s in ss}
-    extra = [t for t in (d["tags"] or []) if t not in known]
-
-    def _chip(tag, label):
-        on = " on" if tag in applied else ""
-        return (f"<button type=button class='tagopt{on}' data-tag=\"{ui.esc(tag)}\">"
-                f"{ui.esc(label)}</button>")
-
-    # current tags: grouped by category, sub-tags indented, only the ones present
-    cur = []
-    for cat, subs in tax:
-        present = [s for s in subs if s in applied]
-        if cat not in applied and not present:
-            continue
-        cur.append(
-            f"<div class=ctgroup><span class=ctcat>{ui.esc(cat)}</span>"
-            + "".join(f"<span class=ctsub>{ui.esc(s.split(':', 1)[1])}</span>" for s in present)
-            + "</div>")
-    if extra:
-        cur.append("<div class=ctgroup>"
-                   + "".join(f"<span class=ctsub>{ui.esc(t)}</span>" for t in extra) + "</div>")
-    current_html = "".join(cur) or "<div class=ctempty>No tags yet</div>"
-
-    # editable picker: every category, sub-tags indented under it, applied highlit
-    pick_html = "".join(
-        f"<div class=pgroup><div class=pgcat>{_chip(cat, cat)}</div>"
-        f"<div class=pgsubs>" + "".join(_chip(s, s.split(':', 1)[1]) for s in subs)
-        + "</div></div>"
-        for cat, subs in tax)
-
-    sheet = f"""
-    <div class="wrap detailwrap">
-      <main>
-        <a class=back href=/>← Catalog</a>
-        <div class=sheet>
-          <h1 style="margin:.2rem 0 .4rem">{ui.esc(d['title'])}</h1>
-          {pipeline}
-          <div class=meta><span class=mono>#{d['id']}</span>
-            <span class=mono>{ui.esc(d['sha'][:24])}…</span>
-            <span>{ui.esc(d['mime'])}</span>
-            <span>{d['size']:,} bytes</span>
-            <span>{d['pages'] or 0} pages</span>
-            <span>{d['created_at']:%Y-%m-%d %H:%M}</span></div>
-          <div class=act style="margin-top:.8rem;flex-wrap:wrap">
-            <a class='btn ghost' href='/doc/{d['id']}/raw' target=_blank>View original</a>
-            <button class='btn ghost' onclick="reprocess({d['id']},'text')">Re-run text</button>
-            <button class='btn ghost' onclick="reprocess({d['id']},'ocr')">Re-run OCR</button>
-            <button class='btn ghost' onclick="reprocess({d['id']},'embed')">Re-tag</button>
-            <button class='btn ghost' onclick="reprocess({d['id']},'embed_pages')" title="Embed each page for page-level semantic search">Embed pages</button>
-            <button class='btn danger' onclick="del({d['id']})">Delete</button>
-            <span class=saved id=act_msg></span>
-          </div>
-
-          <div class=section>
-            <p class=eyebrow>Manage</p>
-            <div class=field><label>Title</label>
-              <input id=f_title value="{ui.esc(d['title'])}"></div>
-            <div class=field><label>Type</label>
-              <input id=f_type placeholder="e.g. tax · statement · medical" value="{ui.esc(d['doc_type'] or '')}"></div>
-            <div class=field><label>Status</label>
-              <select id=f_status>{opts}</select></div>
-          </div>
-
-          <div class=section><p class=eyebrow>Provenance</p>
-            <ul class=prov>{prov_html}</ul></div>
-
-          <div class=section><p class=eyebrow>Extracted text</p>
-            {pages_html}</div>
-        </div>
-      </main>
-      <aside class=tagaside>
-        <p class=eyebrow>Tags</p>
-        <div class=curtags>{current_html}</div>
-        <div class=tagedit>
-          <p class=eyebrow>Add or change</p>
-          <div class=tagpick id=f_tags>{pick_html}</div>
-          <input id=f_extra class=tagextra autocomplete=off
-            placeholder="+ custom, comma-separated" value="{ui.esc(', '.join(extra))}">
-          <div class=act style="margin-top:.7rem">
-            <button class=btn onclick="save({d['id']})">Save</button>
-            <span class=saved id=saved>Saved</span></div>
-        </div>
-      </aside>
-    </div>
-    <script>
-    document.getElementById('f_tags').addEventListener('click',function(e){{
-      const b=e.target.closest('.tagopt'); if(b) b.classList.toggle('on');
-    }});
-    async function save(id){{
-      const picked=[...document.querySelectorAll('#f_tags .tagopt.on')].map(b=>b.dataset.tag);
-      const extra=document.getElementById('f_extra').value.split(',').map(s=>s.trim()).filter(Boolean);
-      const body={{title:f_title.value,doc_type:f_type.value||null,
-        status:f_status.value,
-        tags:[...new Set([...picked,...extra])]}};
-      const r=await fetch('/api/doc/'+id,{{method:'POST',
-        headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}});
-      const s=document.getElementById('saved');
-      if(r.ok){{s.textContent='Saved';s.classList.add('show');setTimeout(()=>s.classList.remove('show'),1600);}}
-      else{{s.textContent='Save failed';s.classList.add('show');}}
-    }}
-    async function reprocess(id,stage){{
-      const m=document.getElementById('act_msg');
-      const r=await fetch('/api/doc/'+id+'/reprocess',{{method:'POST',
-        headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{stage:stage}})}});
-      m.textContent=r.ok?('Queued '+stage):'Failed';m.classList.add('show');
-      setTimeout(()=>m.classList.remove('show'),2000);
-    }}
-    async function del(id){{
-      if(!confirm('Delete this document, its text, and its stored file? This cannot be undone.'))return;
-      const r=await fetch('/api/doc/'+id+'/delete',{{method:'POST'}});
-      if(r.ok){{location.href='/';}}
-      else{{const m=document.getElementById('act_msg');m.textContent='Delete failed';m.classList.add('show');}}
-    }}
-    </script>
-    """
-    return ui.shell(d["title"], sheet)
-
-
-@app.get("/doc/{doc_id}/raw")
-def raw(doc_id: int):
-    d = _one("SELECT b.path, b.mime, d.title FROM document d"
-             " JOIN blob b ON b.sha256=d.primary_blob_sha WHERE d.id=%s", (doc_id,))
-    if not d or not Path(d["path"]).exists():
-        return JSONResponse({"error": "not found"}, status_code=404)
-    # inline so PDFs/images open in the tab; browser still lets you download.
-    return FileResponse(
-        d["path"], media_type=d["mime"],
-        headers={"Content-Disposition": f'inline; filename="{d["title"]}"'},
-    )
-
-
 @app.post("/api/doc/{doc_id}")
 async def update(doc_id: int, request: Request):
     p = await request.json()
@@ -605,131 +467,6 @@ def api_field_delete(field_id: int):
     return {"ok": True}
 
 
-_JOB_DOT = {"done": "ok", "failed": "warn", "running": "run", "pending": "idle"}
-
-_RULE_JS = """
-<script>
-async function _rule(path, body){
-  const r = await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(body)});
-  if(r.ok){location.reload();} else {alert('Rule update failed');}
-}
-function addRule(id){
-  const p=document.getElementById('rp'+id).value.trim(); if(!p) return;
-  _rule('/api/sender-rule',{account_id:id,pattern:p,
-    action:document.getElementById('rq'+id).value});
-}
-function delRule(id,pattern,action){
-  _rule('/api/sender-rule/delete',{account_id:id,pattern:pattern,action:action});
-}
-</script>
-"""
-
-
-@app.get("/status", response_class=HTMLResponse)
-def status_page():
-    d = _status_data()
-
-    if d["accounts"]:
-        cards = []
-        for a in d["accounts"]:
-            rules = _rows("SELECT pattern, action FROM sender_rule WHERE account_id=%s"
-                          " ORDER BY action, pattern", (a["id"],))
-            chips = "".join(
-                f"<span class='rule {r['action']}'>{ui.esc(r['pattern'])}"
-                f"<span class=ra>{r['action']}</span>"
-                # json.dumps -> JS-safe string literal, ui.esc -> attribute-safe.
-                # (ui.esc alone HTML-escapes for a JS literal, which an apostrophe
-                # in the pattern would then break / could inject.)
-                f"<button class=rx title=remove onclick=\"delRule({a['id']},"
-                f"{ui.esc(json.dumps(r['pattern']))},{ui.esc(json.dumps(r['action']))})\">×</button></span>"
-                for r in rules) or "<span class=m>no rules — all senders ingested</span>"
-            synced = ("synced " + a["last_full_sync_at"].strftime("%Y-%m-%d %H:%M")
-                      if a["last_full_sync_at"] else "never synced")
-            cards.append(
-                "<div class=acct>"
-                "<div class=acctrow>"
-                f"<span class=em>{ui.esc(a['email'])}</span>"
-                f"<span class=m>{a['attachments']} attachments</span>"
-                f"<span class=m>{synced}</span>"
-                f"<span class='chip {'s-ok' if a['synced'] else 's-muted'}'>"
-                f"{'active' if a['status']=='active' else ui.esc(a['status'])}</span>"
-                "</div>"
-                "<div class=rules><p class=eyebrow>Sender rules</p>"
-                f"<div class=rulelist>{chips}</div>"
-                "<div class=ruleadd>"
-                f"<input id=rp{a['id']} placeholder='sender contains… e.g. chase.com'>"
-                f"<select id=rq{a['id']}><option value=allow>allow</option>"
-                "<option value=deny>deny</option></select>"
-                f"<button class=btn onclick='addRule({a['id']})'>Add</button></div>"
-                "<p class=upnote>No rules ingest every sender. Any <b>allow</b> rule "
-                "means only matching senders are ingested; a <b>deny</b> always "
-                "excludes. Matching is case-insensitive substring on the From header."
-                "</p></div></div>")
-        acct_html = "".join(cards) + _RULE_JS
-    else:
-        acct_html = ("<div class=empty><b>No Gmail accounts connected</b>"
-                     "Mount a token secret (doccat-gmail) and the worker registers "
-                     "accounts on its next poll.</div>")
-
-    src = {s["source"]: s["n"] for s in d["sources"]}
-    stats = (
-        "<div class=statgrid>"
-        f"<div class=stat><div class=k>Documents</div><div class=v>{d['documents']}</div></div>"
-        f"<div class=stat><div class=k>From upload</div><div class=v>{src.get('upload',0)}</div>"
-        "<div class=sub>source events</div></div>"
-        f"<div class=stat><div class=k>From gmail</div><div class=v>{src.get('gmail',0)}</div>"
-        "<div class=sub>source events</div></div>"
-        "</div>")
-
-    if d["jobs"]:
-        by_stage = {}
-        for j in d["jobs"]:
-            by_stage.setdefault(j["stage"], {})[j["state"]] = j["n"]
-        order = ["pending", "running", "done", "failed"]
-        cards = []
-        for stage in sorted(by_stage):
-            states = by_stage[stage]
-            total = sum(states.values())
-            pills = "".join(
-                f"<div class='qs {_JOB_DOT.get(st, 'idle')}'>"
-                f"<span class=qn>{states[st]}</span><span class=ql>{st}</span></div>"
-                for st in order if st in states)
-            cards.append(
-                f"<div class=qcard><div class=qhead>"
-                f"<span class=qstage>{ui.esc(stage)}</span>"
-                f"<span class=qtot>{total}</span></div>"
-                f"<div class=qstates>{pills}</div></div>")
-        jobs_html = "<div class=qgrid>" + "".join(cards) + "</div>"
-    else:
-        jobs_html = "<p class=count>No jobs yet.</p>"
-
-    if d["failures"]:
-        frows = "".join(
-            "<tr>"
-            f"<td class=mono>#{f['id']}</td>"
-            f"<td class=mono>{ui.esc(f['stage'])}</td>"
-            f"<td>{ui.esc(f['title'])}</td>"
-            f"<td class=mono>{ui.esc(f['error'])}</td></tr>"
-            for f in d["failures"])
-        fails_html = ("<div class=section><p class=eyebrow>Recent failures</p>"
-                      "<table class=qtable><thead><tr><th>Job</th><th>Stage</th>"
-                      "<th>Document</th><th>Error</th></tr></thead><tbody>"
-                      + frows + "</tbody></table></div>")
-    else:
-        fails_html = ""
-
-    body = (
-        "<div class=wrap style='grid-template-columns:1fr'><main>"
-        "<div class=titlerow><div><h1 class=title>Status</h1>"
-        "<span class=count>ingestion &amp; pipeline health</span></div>"
-        + ui.autoref() + "</div>"
-        f"{stats}"
-        "<div class=section><p class=eyebrow>Job queue</p>" + jobs_html + "</div>"
-        "<div class=section><p class=eyebrow>Gmail accounts</p>" + acct_html + "</div>"
-        f"{fails_html}"
-        "</main></div>")
-    return ui.shell("Status", body)
 
 
 @app.post("/api/sender-rule")
