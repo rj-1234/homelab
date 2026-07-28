@@ -21,3 +21,7 @@ graphify-out/
 k8-dashboard/
 k8/
 .codegraph/
+# Agent-skill tooling installed locally (not project code)
+.agents/
+.codex/
+skills-lock.json
