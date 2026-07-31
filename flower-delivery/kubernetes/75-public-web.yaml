@@ -1,0 +1,80 @@
+---
+# Recipient-facing surface. Caddy serves the static Vite build and reverse-
+# proxies only /api/gifts/* to the api pod, as a defense-in-depth allow-list.
+# Build produced on the host (`cd web && npm run build`) and hostPath-mounted
+# read-only, same no-Node-in-prod pattern as doc-catalog.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: public-web-caddy
+  namespace: flowers
+data:
+  Caddyfile: |
+    {
+      admin off
+      auto_https off
+    }
+    :8080 {
+      encode gzip
+      @api path /api/gifts /api/gifts/*
+      handle @api {
+        reverse_proxy api:8000
+      }
+      handle {
+        root * /srv/web
+        try_files {path} /index.html
+        file_server
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: public-web
+  namespace: flowers
+  labels: { app.kubernetes.io/name: public-web }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: public-web } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: public-web } }
+    spec:
+      nodeSelector: { kubernetes.io/hostname: cheeky-mini }
+      securityContext: { runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000 }
+      containers:
+        - name: caddy
+          image: caddy:2-alpine
+          command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile"]
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - { name: XDG_DATA_HOME, value: /tmp/caddy-data }
+            - { name: XDG_CONFIG_HOME, value: /tmp/caddy-config }
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            failureThreshold: 12
+          volumeMounts:
+            - { name: caddyfile, mountPath: /etc/caddy }
+            - { name: web, mountPath: /srv/web, readOnly: true }
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      volumes:
+        - name: caddyfile
+          configMap: { name: public-web-caddy }
+        - name: web
+          hostPath:
+            path: /home/cheeky/github/homelab/flower-delivery/web/dist
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: public-web
+  namespace: flowers
+  labels: { app.kubernetes.io/name: public-web }
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: public-web }
+  ports: [{ name: http, port: 8080, targetPort: http }]

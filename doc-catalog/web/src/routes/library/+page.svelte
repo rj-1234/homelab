@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { page } from '$app/stores';
   import { listDocuments, listTags, getTaxonomy } from '$lib/api.js';
   import DocCard from '$lib/DocCard.svelte';
   import Uploader from '$lib/Uploader.svelte';
@@ -8,6 +9,8 @@
   let query = $state('');
   let tag = $state('');
   let statusFilter = $state('');
+  let fieldFilter = $state(''); // vault field id → docs this value came from
+  let fieldLabel = $state(''); // human label for the banner (not the value)
   let tags = $state([]);
   let statuses = $state([]);
   let docs = $state([]);
@@ -24,7 +27,11 @@
     loading = true;
     try {
       const q = query.trim();
-      const rows = q ? await listDocuments({ q }) : await listDocuments({ tag, status: statusFilter });
+      const rows = q
+        ? await listDocuments({ q })
+        : fieldFilter
+          ? await listDocuments({ field: fieldFilter })
+          : await listDocuments({ tag, status: statusFilter });
       if (my !== reqId) return; // a newer request has since started
       docs = rows;
       error = '';
@@ -36,24 +43,39 @@
     }
   }
 
+  // Leaving the field-scoped view: drop the filter + clean the URL so a reload
+  // doesn't reapply it.
+  function clearField() {
+    fieldFilter = '';
+    fieldLabel = '';
+    history.replaceState(null, '', '/library');
+    load();
+  }
+
   function onInput() {
+    if (fieldFilter) clearField();
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(load, 250);
   }
 
   function selectTag(t) {
+    if (fieldFilter) clearField();
     tag = t;
     query = '';
     load();
   }
 
   function selectStatus(s) {
+    if (fieldFilter) clearField();
     statusFilter = s;
     query = '';
     load();
   }
 
   onMount(async () => {
+    const sp = $page.url.searchParams;
+    fieldFilter = sp.get('field') ?? '';
+    fieldLabel = sp.get('label') ?? '';
     load();
     try { tags = await listTags(); } catch { /* filter chips are best-effort */ }
     try { statuses = (await getTaxonomy()).statuses ?? []; } catch { /* filter chips are best-effort */ }
@@ -79,6 +101,18 @@
       oninput={onInput}
     />
   </div>
+
+  {#if fieldFilter}
+    <div class="fieldbar">
+      <span class="fb-ic" aria-hidden="true"><Icon name="filter" size="15px" /></span>
+      <span class="fb-txt">
+        Documents containing{#if fieldLabel} <strong>{fieldLabel}</strong>{:else} this field{/if}
+      </span>
+      <button class="fb-clear mono" onclick={clearField}>
+        <Icon name="x" size="13px" /> Clear
+      </button>
+    </div>
+  {/if}
 
   <div class="chips">
     <button class="chip" class:active={!tag} onclick={() => selectTag('')}>All</button>
@@ -149,6 +183,24 @@
   }
   .search::placeholder { color: var(--faint); }
   .search:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+  .fieldbar {
+    display: flex; align-items: center; gap: var(--s-3);
+    background: var(--teal-wash);
+    border: 1px solid color-mix(in srgb, var(--teal) 28%, var(--line));
+    border-radius: var(--radius); padding: 10px 12px; margin-bottom: var(--s-4);
+    font-size: var(--t-sm);
+  }
+  .fb-ic { display: grid; place-items: center; color: var(--teal); flex: none; }
+  .fb-txt { color: var(--ink); }
+  .fb-txt strong { font-weight: 600; }
+  .fb-clear {
+    margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 4px;
+    background: transparent; border: 1px solid color-mix(in srgb, var(--teal) 30%, var(--line));
+    color: var(--teal); border-radius: var(--radius-pill); padding: 5px 11px;
+    font-size: 0.6875rem; cursor: pointer; min-height: 32px;
+  }
+  .fb-clear:hover { background: color-mix(in srgb, var(--teal) 14%, transparent); }
 
   .chips {
     display: flex; gap: var(--s-2); overflow-x: auto; -webkit-overflow-scrolling: touch;

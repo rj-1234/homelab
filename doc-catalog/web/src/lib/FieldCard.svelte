@@ -32,6 +32,16 @@
 
   const shown = $derived(revealed != null);
   const expired = $derived(field.expiry && new Date(field.expiry) < new Date());
+
+  // Trace back to the document(s) this value was extracted from. One source →
+  // straight to the doc; several → the Library filtered to just those docs (the
+  // opaque field id goes in the URL, never the plaintext value).
+  const count = $derived(field.doc_count ?? 0);
+  const srcHref = $derived(
+    count === 1
+      ? `/doc/${field.document_id}`
+      : `/library?field=${field.id}&label=${encodeURIComponent(field.label ?? '')}`
+  );
 </script>
 
 <div class="field card" class:expired class:live={shown}>
@@ -59,6 +69,13 @@
       </button>
     </div>
   </div>
+
+  {#if count > 0}
+    <a class="src mono" href={srcHref}>
+      <Icon name={count === 1 ? 'file-text' : 'external-link'} size="13px" />
+      {count === 1 ? 'View source' : `${count} documents`}
+    </a>
+  {/if}
 </div>
 
 <style>
@@ -75,6 +92,12 @@
   .exp.warn { color: var(--stamp); }
 
   .valrow { display: flex; align-items: center; gap: 8px; margin-top: 11px; }
+
+  .src {
+    display: inline-flex; align-items: center; gap: 5px; margin-top: 10px;
+    font-size: 0.6875rem; color: var(--muted); letter-spacing: 0.02em;
+  }
+  .src:hover { color: var(--teal); text-decoration: none; }
 
   /* the redaction bar: a concealed stripe that lifts to a clear teal value */
   .val {

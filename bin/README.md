@@ -16,6 +16,7 @@ homelab help
 Creds & secrets
   token [dur]          Headlamp login bearer token (default 168h)
   grafana-pw           print Grafana admin password
+  creds                gather every service credential into gitignored CREDENTIALS.md
   set-cf-token         paste + store a new cloudflared token, restart connector
   set-grafana-pw [pw]  set/rotate Grafana password (random if omitted)
   check-secrets        verify required secrets exist
@@ -36,7 +37,7 @@ Node-join & debug
   debug [svc]          diagnostics bundle (+ describe/logs for <svc>)
 ```
 
-`svc` = `jellyfin | homepage | headlamp | cloudflared | grafana | prometheus`
+`svc` = `jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin`
 
 ## Config (env overrides)
 `KUBECONFIG` (default `/etc/rancher/k3s/k3s.yaml`), `HOMELAB_DOMAIN`,

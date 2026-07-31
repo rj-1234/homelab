@@ -27,13 +27,17 @@ data:
       Downloads:
         icon: mdi-download-circle-outline
         style: row
-        columns: 2
+        columns: 1
       Documents:
         icon: mdi-file-document-multiple-outline
         style: row
-        columns: 2
+        columns: 1
       Infrastructure:
         icon: mdi-server
+        style: row
+        columns: 2
+      Gifts:
+        icon: mdi-flower-tulip-outline
         style: row
         columns: 2
 
@@ -46,24 +50,6 @@ data:
             siteMonitor: http://jellyfin.media.svc.cluster.local:8096
             statusStyle: dot
     - Downloads:
-        - Prowlarr:
-            href: https://cheeky-mini.tail2f4253.ts.net:9696
-            description: Indexer manager
-            icon: prowlarr.png
-            siteMonitor: http://10.43.200.20:9696
-            statusStyle: dot
-        - Radarr:
-            href: https://cheeky-mini.tail2f4253.ts.net:7878
-            description: Movies
-            icon: radarr.png
-            siteMonitor: http://10.43.200.21:7878
-            statusStyle: dot
-        - Sonarr:
-            href: https://cheeky-mini.tail2f4253.ts.net:8989
-            description: TV
-            icon: sonarr.png
-            siteMonitor: http://10.43.200.22:8989
-            statusStyle: dot
         - qBittorrent:
             href: https://cheeky-mini.tail2f4253.ts.net:8080
             description: Torrent client · no VPN
@@ -71,12 +57,6 @@ data:
             siteMonitor: http://10.43.200.23:8080
             statusStyle: dot
     - Documents:
-        - FileBrowser:
-            href: https://cheeky-mini.tail2f4253.ts.net:8090
-            description: Upload & inbox · doc catalog
-            icon: filebrowser.png
-            siteMonitor: http://10.43.200.31:8080
-            statusStyle: dot
         - Field Vault:
             href: https://cheeky-mini.tail2f4253.ts.net:8091
             description: Vault · library · semantic search
@@ -100,6 +80,19 @@ data:
             href: https://one.dash.cloudflare.com
             description: Public ingress · ch33ky.org
             icon: cloudflare-zero-trust.png
+    - Gifts:
+        - Flowers:
+            href: https://flowers.ch33ky.org
+            description: Digital flower delivery · tie a bouquet, choose how long it lasts
+            icon: mdi-flower-tulip-outline
+            siteMonitor: http://public-web.flowers.svc.cluster.local:8080
+            statusStyle: dot
+        - Flowers Admin:
+            href: https://cheeky-mini.tail2f4253.ts.net:8092
+            description: Sent bouquets · tailnet-only
+            icon: mdi-flower-outline
+            siteMonitor: http://admin-web.flowers.svc.cluster.local:8080
+            statusStyle: dot
 
   widgets.yaml: |
     - greeting:

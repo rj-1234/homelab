@@ -128,9 +128,28 @@ def healthz():
 
 
 @app.get("/api/documents")
-def api_documents(q: str = "", status: str = "", tag: str = ""):
+def api_documents(q: str = "", status: str = "", tag: str = "", field: str = ""):
     if q.strip():
         return _hybrid_search(q.strip())
+    if field.strip():
+        # Docs a given vault field was extracted from. Resolve the opaque field id
+        # to its (entity_class, value) server-side — the plaintext value is never
+        # in the request URL. Canonical docs only, so the count matches the shelf.
+        try:
+            fid = int(field)
+        except ValueError:
+            return []
+        f = _one("SELECT entity_class, value FROM field WHERE id=%s", (fid,))
+        if not f:
+            return []
+        return _rows(
+            f"SELECT {_DOC_COLS} FROM document d JOIN blob b ON b.sha256=d.primary_blob_sha"
+            " WHERE d.canonical_document_id IS NULL AND EXISTS ("
+            "  SELECT 1 FROM field f WHERE f.document_id=d.id"
+            "  AND f.entity_class=%s AND f.value=%s)"
+            " ORDER BY d.created_at DESC LIMIT 500",
+            (f["entity_class"], f["value"]),
+        )
     where = "WHERE d.canonical_document_id IS NULL"
     args = []
     if status:
@@ -383,13 +402,24 @@ def _mask_value(value):
 @app.get("/api/fields")
 def api_fields():
     """Vault shelf: confirmed fields, deduped by (entity_class, value) so the same
-    value on multiple documents shows once; masked, newest-valid first per class."""
+    value on multiple documents shows once; masked, newest-valid first per class.
+    `doc_count` = how many canonical documents this value was extracted from, so
+    the card can link back to its source(s)."""
     return _rows(
-        "SELECT * FROM (SELECT DISTINCT ON (entity_class, value)"
-        " id, document_id, entity_class, label, value_masked, expiry, valid_from, score"
+        # NOTE: `value` (plaintext) is selected in the inner query only so the
+        # doc_count subquery can correlate on it — it is deliberately NOT projected
+        # in the outer SELECT, so the raw value never leaves the server here.
+        "SELECT t.id, t.document_id, t.entity_class, t.label, t.value_masked,"
+        " t.expiry, t.valid_from, t.score,"
+        " (SELECT count(DISTINCT f2.document_id) FROM field f2"
+        "  JOIN document d2 ON d2.id=f2.document_id"
+        "  WHERE f2.entity_class=t.entity_class AND f2.value=t.value"
+        "  AND d2.canonical_document_id IS NULL) AS doc_count"
+        " FROM (SELECT DISTINCT ON (entity_class, value)"
+        " id, document_id, entity_class, value, label, value_masked, expiry, valid_from, score"
         " FROM field WHERE confirmed=true"
         " ORDER BY entity_class, value, (expiry IS NULL), expiry DESC, created_at DESC) t"
-        " ORDER BY entity_class, (expiry IS NULL), expiry DESC")
+        " ORDER BY t.entity_class, (t.expiry IS NULL), t.expiry DESC")
 
 
 @app.get("/api/review")

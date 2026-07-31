@@ -13,11 +13,12 @@ const post = (path, body) =>
     body: body ? JSON.stringify(body) : undefined
   });
 
-export const listDocuments = ({ q = '', status = '', tag = '' } = {}) => {
+export const listDocuments = ({ q = '', status = '', tag = '', field = '' } = {}) => {
   const p = new URLSearchParams();
   if (q) p.set('q', q);
   if (status) p.set('status', status);
   if (tag) p.set('tag', tag);
+  if (field) p.set('field', field);
   const qs = p.toString();
   return j(`/api/documents${qs ? `?${qs}` : ''}`);
 };

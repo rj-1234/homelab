@@ -35,7 +35,7 @@ into an emptyDir + hostPath-mounted source (see *Deploy*).
 
 ```mermaid
 flowchart LR
-  up[Upload / FileBrowser] --> inbox[(inbox/)]
+  up[Upload via web UI] --> inbox[(inbox/)]
   gm[Gmail poller] --> inbox
   inbox --> worker
   subgraph worker[worker pod · slim]
@@ -86,8 +86,6 @@ flowchart LR
   page live (no polling).
 - **postgres** — `pgvector/pgvector:pg16`: blobs, documents, pages, chunks
   (`vector(768)` + HNSW), tags, jobs, accounts, provenance, fields.
-- **filebrowser** — drops files into `inbox/` for ingest.
-
 ## Pipeline flow
 
 ```
@@ -165,7 +163,6 @@ blobs/ab/cd/<sha256>   content-addressed, immutable originals
 pg/                    Postgres PGDATA
 .models/               HuggingFace cache (bge embedding weights)
 .paddle/               RapidOCR / HOME cache
-.filebrowser/          FileBrowser DB
 ```
 
 ## Deploy (no image build)
@@ -184,7 +181,7 @@ kubectl -n docs create secret generic doccat-postgres \
 kubectl apply -f kubernetes/10-postgres.yaml
 for m in migrations/*.sql; do kubectl -n docs exec -i deploy/postgres -- psql -U doccat -d doccat < "$m"; done
 kubectl apply -f kubernetes/20-worker.yaml -f kubernetes/25-ocr-worker.yaml \
-  -f kubernetes/30-api.yaml -f kubernetes/40-filebrowser.yaml \
+  -f kubernetes/30-api.yaml \
   -f kubernetes/50-embedder.yaml -f kubernetes/60-embed-worker.yaml \
   -f kubernetes/70-web.yaml -f kubernetes/80-presidio.yaml \
   -f kubernetes/85-field-worker.yaml
@@ -201,7 +198,6 @@ reinstalls on restart. Rebuild the SPA (`cd web && npm run build`) after editing
 Expose tailnet-only (host, sudo — no public ingress per principle #5):
 ```bash
 sudo tailscale serve --bg --https=8091 http://10.43.200.33:8080   # Vault / SPA (web)
-sudo tailscale serve --bg --https=8090 http://10.43.200.31:8080   # FileBrowser
 ```
 
 ### Optional integrations
