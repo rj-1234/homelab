@@ -1,0 +1,104 @@
+---
+# Custom "Homelab Overview" Grafana dashboard. The kube-prometheus-stack Grafana
+# runs a sidecar that auto-imports any ConfigMap labeled grafana_dashboard=1.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-homelab-overview
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  homelab-overview.json: |
+    {
+      "title": "Homelab Overview",
+      "uid": "homelab-overview",
+      "tags": ["homelab"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-6h", "to": "now" },
+      "templating": {
+        "list": [
+          { "name": "datasource", "type": "datasource", "query": "prometheus",
+            "current": { "text": "Prometheus", "value": "Prometheus" }, "hide": 0 }
+        ]
+      },
+      "panels": [
+        { "id": 1, "type": "stat", "title": "Nodes Ready", "gridPos": {"h":4,"w":4,"x":0,"y":0},
+          "datasource": {"type":"prometheus","uid":"${datasource}"},
+          "targets": [{"expr":"count(kube_node_status_condition{condition=\"Ready\",status=\"true\"})"}],
+          "fieldConfig": {"defaults": {"color": {"mode":"thresholds"}, "thresholds": {"steps":[{"color":"green","value":null}]}}} },
+
+        { "id": 2, "type": "stat", "title": "Pods Running", "gridPos": {"h":4,"w":4,"x":4,"y":0},
+          "datasource": {"type":"prometheus","uid":"${datasource}"},
+          "targets": [{"expr":"sum(kube_pod_status_phase{phase=\"Running\"})"}] },
+
+        { "id": 3, "type": "stat", "title": "Pods Not Running", "gridPos": {"h":4,"w":4,"x":8,"y":0},
+          "datasource": {"type":"prometheus","uid":"${datasource}"},
+          "targets": [{"expr":"sum(kube_pod_status_phase{phase=~\"Failed|Pending|Unknown\"}) or vector(0)"}],
+          "fieldConfig": {"defaults": {"thresholds": {"steps":[{"color":"green","value":null},{"color":"red","value":1}]}, "color": {"mode":"thresholds"}}} },
+
+        { "id": 4, "type": "stat", "title": "Restarts (1h)", "gridPos": {"h":4,"w":4,"x":12,"y":0},
+          "datasource": {"type":"prometheus","uid":"${datasource}"},
+          "targets": [{"expr":"sum(increase(kube_pod_container_status_restarts_total[1h])) or vector(0)"}],
+          "fieldConfig": {"defaults": {"thresholds": {"steps":[{"color":"green","value":null},{"color":"yellow","value":3},{"color":"red","value":10}]}, "color": {"mode":"thresholds"}}} },
+
+        { "id": 5, "type": "gauge", "title": "Cluster CPU %", "gridPos": {"h":4,"w":4,"x":16,"y":0},
+          "datasource": {"type":"prometheus","uid":"${datasource}"},
+          "targets": [{"expr":"100 * sum(rate(node_cpu_seconds_total{mode!=\"idle\"}[5m])) / sum(rate(node_cpu_seconds_total[5m]))"}],
+          "fieldConfig": {"defaults": {"unit":"percent","min":0,"max":100,"thresholds":{"steps":[{"color":"green","value":null},{"color":"yellow","value":70},{"color":"red","value":90}]}}} },
+
+        { "id": 6, "type": "gauge", "title": "Cluster Mem %", "gridPos": {"h":4,"w":4,"x":20,"y":0},
+          "datasource": {"type":"prometheus","uid":"${datasource}"},
+          "targets": [{"expr":"100 * (1 - sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes))"}],
+          "fieldConfig": {"defaults": {"unit":"percent","min":0,"max":100,"thresholds":{"steps":[{"color":"green","value":null},{"color":"yellow","value":75},{"color":"red","value":90}]}}} },
+
+        { "id": 7, "type": "timeseries", "title": "Node CPU % (per core avg)", "gridPos": {"h":8,"w":12,"x":0,"y":4},
+          "datasource": {"type":"prometheus","uid":"${datasource}"},
+          "targets": [{"expr":"100 - (avg by(instance)(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)","legendFormat":"{{instance}}"}],
+          "fieldConfig": {"defaults": {"unit":"percent","min":0,"max":100}} },
+
+        { "id": 8, "type": "timeseries", "title": "Node Memory Used %", "gridPos": {"h":8,"w":12,"x":12,"y":4},
+          "datasource": {"type":"prometheus","uid":"${datasource}"},
+          "targets": [{"expr":"100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))","legendFormat":"{{instance}}"}],
+          "fieldConfig": {"defaults": {"unit":"percent","min":0,"max":100}} },
+
+        { "id": 9, "type": "timeseries", "title": "Disk I/O (bytes/s)", "gridPos": {"h":8,"w":12,"x":0,"y":12},
+          "datasource": {"type":"prometheus","uid":"${datasource}"},
+          "targets": [
+            {"expr":"sum(rate(node_disk_read_bytes_total[5m]))","legendFormat":"read"},
+            {"expr":"sum(rate(node_disk_written_bytes_total[5m]))","legendFormat":"write"}
+          ],
+          "fieldConfig": {"defaults": {"unit":"Bps"}} },
+
+        { "id": 10, "type": "timeseries", "title": "Network (bytes/s)", "gridPos": {"h":8,"w":12,"x":12,"y":12},
+          "datasource": {"type":"prometheus","uid":"${datasource}"},
+          "targets": [
+            {"expr":"sum(rate(node_network_receive_bytes_total{device!~\"lo|cni.*|flannel.*|veth.*\"}[5m]))","legendFormat":"rx"},
+            {"expr":"sum(rate(node_network_transmit_bytes_total{device!~\"lo|cni.*|flannel.*|veth.*\"}[5m]))","legendFormat":"tx"}
+          ],
+          "fieldConfig": {"defaults": {"unit":"Bps"}} },
+
+        { "id": 11, "type": "timeseries", "title": "CPU by Namespace (cores)", "gridPos": {"h":8,"w":12,"x":0,"y":20},
+          "datasource": {"type":"prometheus","uid":"${datasource}"},
+          "targets": [{"expr":"sum by(namespace)(rate(container_cpu_usage_seconds_total{container!=\"\",namespace!=\"\"}[5m]))","legendFormat":"{{namespace}}"}],
+          "fieldConfig": {"defaults": {"unit":"none"}} },
+
+        { "id": 12, "type": "timeseries", "title": "Memory by Namespace", "gridPos": {"h":8,"w":12,"x":12,"y":20},
+          "datasource": {"type":"prometheus","uid":"${datasource}"},
+          "targets": [{"expr":"sum by(namespace)(container_memory_working_set_bytes{container!=\"\",namespace!=\"\"})","legendFormat":"{{namespace}}"}],
+          "fieldConfig": {"defaults": {"unit":"bytes"}} },
+
+        { "id": 13, "type": "timeseries", "title": "Filesystem Used %", "gridPos": {"h":8,"w":12,"x":0,"y":28},
+          "datasource": {"type":"prometheus","uid":"${datasource}"},
+          "targets": [{"expr":"100 - (node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\",mountpoint!~\"/var/lib/kubelet.*\"} / node_filesystem_size_bytes * 100)","legendFormat":"{{mountpoint}}"}],
+          "fieldConfig": {"defaults": {"unit":"percent","min":0,"max":100}} },
+
+        { "id": 14, "type": "timeseries", "title": "API Server Request Rate", "gridPos": {"h":8,"w":12,"x":12,"y":28},
+          "datasource": {"type":"prometheus","uid":"${datasource}"},
+          "targets": [{"expr":"sum by(code)(rate(apiserver_request_total[5m]))","legendFormat":"{{code}}"}],
+          "fieldConfig": {"defaults": {"unit":"reqps"}} }
+      ]
+    }

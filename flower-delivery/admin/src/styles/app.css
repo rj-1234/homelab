@@ -1,0 +1,174 @@
+html, body, #app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-neutral-100);
+}
+
+/* Operate mode: one working family for the whole surface. Caprasimo is
+   reserved for the single page title; every control, label, and data cell
+   below uses Figtree — a display face in a table read as noise, not brand. */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-body);
+  font-weight: 700;
+  letter-spacing: normal;
+}
+
+.page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4) var(--space-8);
+}
+
+.page-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.page-title {
+  font-family: var(--font-heading);
+  font-size: 28px;
+  margin: 0;
+}
+
+.page-meta {
+  font-size: 13px;
+  color: var(--color-neutral-600);
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-100);
+}
+
+table.gifts {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+table.gifts thead th {
+  position: sticky;
+  top: 0;
+  text-align: left;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+  background: var(--color-neutral-100);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-divider);
+  white-space: nowrap;
+}
+
+table.gifts tbody td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 6%, transparent);
+  vertical-align: top;
+}
+
+table.gifts tbody tr:hover {
+  background: color-mix(in srgb, var(--color-text) 3%, transparent);
+}
+
+.message-cell {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stems-cell {
+  max-width: 220px;
+}
+
+.note-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: var(--color-accent-100);
+  color: var(--color-accent-800);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.status-not_opened {
+  background: var(--color-neutral-300);
+  color: var(--color-neutral-800);
+}
+.status-live {
+  background: var(--color-accent-2-200);
+  color: var(--color-accent-2-800);
+}
+.status-expired {
+  background: var(--color-accent-200);
+  color: var(--color-accent-800);
+}
+
+.id-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.link-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.empty-state, .error-state {
+  padding: var(--space-8) var(--space-4);
+  text-align: center;
+  color: var(--color-neutral-700);
+}
+.empty-state h2, .error-state h2 {
+  font-size: 16px;
+  margin-bottom: var(--space-2);
+  color: var(--color-text);
+}
+
+/* Skeleton rows — a shape of the eventual content, not a spinner. */
+.skeleton-row td {
+  padding: var(--space-3);
+}
+.skeleton-bar {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--color-neutral-300) 25%,
+    var(--color-neutral-200) 37%,
+    var(--color-neutral-300) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-bar { animation: none; }
+}

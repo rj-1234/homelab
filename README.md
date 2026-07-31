@@ -1,9 +1,13 @@
 # homelab — `cheeky-mini`
 
-Single-node **k3s** homelab running a Jellyfin media server plus a small
-platform stack (dashboard, service hub, secure remote access). Built to grow:
-adding agent nodes later is a one-liner, and workloads that must stay on this
-box are already pinned with node labels/affinity.
+Single-node **k3s** homelab running a Jellyfin media server, a personal
+**document + field vault** ([doc-catalog](doc-catalog/README.md)), a
+**digital flower gift** app ([flower-delivery](flower-delivery/)), download
+automation ([arr/](arr/kubernetes/README.md)), a metrics stack (Grafana +
+Prometheus), and a small platform stack (dashboard, service hub, secure
+remote access). Built to grow: adding agent nodes later is a one-liner, and
+workloads that must stay on this box are already pinned with node
+labels/affinity.
 
 > **Resilience honesty:** one node = **pod self-healing only**. k3s restarts
 > crashed pods; it does **not** survive the machine dying. True HA needs 3+
@@ -44,10 +48,21 @@ flowchart TB
         cfd[cloudflared x2 - platform ns]
         subgraph media [namespace: media]
             jelly[Jellyfin - LoadBalancer :8096]
+            qbit[qBittorrent - via gluetun VPN]
         end
         subgraph platform [namespace: platform]
             home[Homepage :3000]
             head[Headlamp :80 - pinned ClusterIP]
+            pgweb[pgweb - shared DB browser, :8081]
+        end
+        subgraph docs [namespace: docs]
+            vault[Field Vault - SvelteKit + Postgres]
+        end
+        subgraph flowers [namespace: flowers]
+            flow[Flowers - React + FastAPI + Postgres]
+        end
+        subgraph monitoring [namespace: monitoring]
+            graf[Grafana + Prometheus]
         end
         usb[(USB NTFS media - read-only)]
         zfs[(rpool ZFS - local-path PVCs)]
@@ -55,12 +70,21 @@ flowchart TB
 
     user -->|home.ch33ky.org| access --> tunnel
     user -->|jellyfin.ch33ky.org| tunnel
+    user -->|flowers.ch33ky.org| tunnel
     tunnel --> cfd
     cfd --> home
     cfd --> jelly
+    cfd --> flow
     phone --> ts
     ts -->|SSH + Headlamp https| head
+    ts -->|vault https :8091| vault
+    ts -->|pgweb https :8081| pgweb
+    ts -->|Grafana https :8443| graf
+    ts -->|qBittorrent https :8080| qbit
+    ts -->|Flowers Admin https :8092| flow
     ts -.-> jelly
+    vault --> zfs
+    flow --> zfs
     jelly --> usb
     jelly --> zfs
     home --> zfs
@@ -72,11 +96,15 @@ flowchart TB
   - `home.ch33ky.org` → Homepage, behind **Cloudflare Access** (email login).
   - `jellyfin.ch33ky.org` → Jellyfin, on **Jellyfin's own auth** (no Access, so
     native mobile/TV apps work).
+  - `flowers.ch33ky.org` → Flowers, no auth (public by design — anyone with
+    the link composes/opens a gift; nothing sensitive is stored).
 - **Private (Tailscale host install):** the node joins the tailnet
   (`tail2f4253.ts.net`). Gives Tailscale SSH into the box and tailnet-only
-  access to admin services.
-  - **Headlamp** is exposed *only* on the tailnet via `tailscale serve` →
-    `https://cheeky-mini.tail2f4253.ts.net`. Never public.
+  access to admin services, each on a pinned ClusterIP + `tailscale serve`
+  port so the binding survives redeploys: **Headlamp** (`:443`), **Field
+  Vault** (`:8091`), **Flowers Admin** (`:8092`), **Grafana** (`:8443`),
+  **qBittorrent** (`:8080`), **pgweb** (`:8081`, shared DB browser for both
+  Postgres instances). None of these are ever public.
 
 ### Secrets
 No secrets in the repo. The Cloudflare connector token lives in a k8s Secret
@@ -93,6 +121,11 @@ files; `*.example.yaml` templates are the only committed config stand-ins.
 | **Headlamp** | `platform` | tailnet-only (`tailscale serve`) | Cluster admin UI (successor to the archived k8s Dashboard). ClusterIP pinned `10.43.142.241` so the host-side `tailscale serve` target is stable. Login = `headlamp` ServiceAccount bearer token (cluster-admin, gated at the network layer). |
 | **Homepage** | `platform` | `home.ch33ky.org` (behind Access) | Central hub. Config is a ConfigMap seeded into a writable `emptyDir` by an initContainer (the image writes into its config dir on boot). Read-only RBAC for k8s service discovery. `HOMEPAGE_ALLOWED_HOSTS` must list every hostname it's served on. |
 | **cloudflared** | `platform` | — (outbound only) | 2 replicas for HA. Token from the `cloudflared-token` Secret; remotely-managed tunnel (routing in the CF dashboard). |
+| **pgweb** | `platform` | tailnet-only (`:8081`) | Shared read-only Postgres browser for *both* apps' DBs (doc-catalog + flowers) via pgweb's bookmark picker (`--bookmarks-only`) instead of one instance per app — each bookmark's DB credentials come from a namespace-mirrored copy of that app's Postgres Secret (`homelab pgweb-sync`). ClusterIP pinned `10.43.103.110`. |
+| **Grafana + Prometheus** | `monitoring` | tailnet-only (`:8443`) | `kube-prometheus-stack` Helm chart — cluster/pod CPU+memory dashboards (kube-state-metrics, node-exporter), Grafana admin password in the `grafana-admin` Secret (`homelab grafana-pw`). Alertmanager off (dashboards-only, saves RAM). |
+| **Field Vault** (doc-catalog) | `docs` | tailnet-only (`tailscale serve :8091`) | Personal document + PII vault. Postgres-only pipeline (ingest → OCR → embed → tag → PII extract), FTS + pgvector hybrid search, Gmail ingest, Presidio field extraction. SvelteKit UI, realtime via SSE. All models on-node, **no public egress**. Own docs + manifests: [doc-catalog/](doc-catalog/README.md). |
+| **Flowers** (flower-delivery) | `flowers` | `flowers.ch33ky.org` (public) | Digital flower gift app. Public compose page (pick up to 5-13 stems from 7 species, pin notes, write a message, choose how long the link stays open); `/g/:id` replays a 60s procedural-SVG bloom→wilt→petal-fall cycle while the link is alive, then permanently shows a pressed-flower keepsake. React + TS frontend, FastAPI + Postgres backend. Read-only admin list of every gift sent lives at **Flowers Admin** (same `flowers` namespace, tailnet-only `:8092`). Own code: [flower-delivery/](flower-delivery/). |
+| **qBittorrent** (arr stack) | `media` | tailnet-only (`:8080`) | Standalone torrent client behind a gluetun VPN kill-switch — manual downloads, no indexer/auto-organize automation (Radarr/Sonarr/Prowlarr were dropped as unneeded). See [arr/kubernetes/README.md](arr/kubernetes/README.md). |
 
 ---
 
@@ -104,10 +137,18 @@ platform/
   00-namespace.yaml        platform namespace
   headlamp/                Headlamp Deployment/Service + admin RBAC
   homepage/                Homepage Deployment/Service + config ConfigMap + discovery RBAC
+  pgweb/                   Shared read-only Postgres browser (both apps' DBs) + bookmarks ConfigMap
+  monitoring/              Grafana + Prometheus (kube-prometheus-stack Helm values)
 cloudflare-tunnel/
   kubernetes/              cloudflared Deployment + values.example.yaml (token via Secret)
   Readme.md                tunnel setup + dashboard routing
-tailscale/README.md        host install + `tailscale serve` for Headlamp
+tailscale/README.md        host install + `tailscale serve` for tailnet-only admin UIs
+doc-catalog/               Personal document + field vault — own README, k8s in
+                           kubernetes/, Python pipeline in src/, SvelteKit web/
+flower-delivery/           Digital flower gift app — FastAPI+Postgres in src/,
+                           React+TS in web/, read-only admin dashboard in admin/
+arr/kubernetes/            qBittorrent (torrent client behind gluetun VPN) — own README
+bin/                       `homelab` management CLI — own README
 ```
 
 Branches: **dev** = current k3s deployment · **archive/docker-legacy** =
@@ -139,6 +180,13 @@ Then: Tailscale ([tailscale/README.md](tailscale/README.md)) for private access 
 SSH, and configure Cloudflare public hostnames + Access
 ([cloudflare-tunnel/Readme.md](cloudflare-tunnel/Readme.md)).
 
+Each other app has its own deploy steps in its own README — doc-catalog
+([doc-catalog/README.md](doc-catalog/README.md)), flower-delivery
+([flower-delivery/README.md](flower-delivery/README.md)), and the arr stack
+([arr/kubernetes/README.md](arr/kubernetes/README.md)). Monitoring
+(`platform/monitoring/`) is Helm-managed — see its own
+[README.md](platform/monitoring/README.md).
+
 ## Operate
 
 Use the **[`homelab` CLI](bin/README.md)** for day-to-day ops
@@ -147,9 +195,9 @@ Use the **[`homelab` CLI](bin/README.md)** for day-to-day ops
 ```bash
 homelab status          # nodes, pods, cloudflared, tailscale
 homelab urls            # all service URLs
-homelab token           # Headlamp login token
-homelab grafana-pw      # Grafana admin password
-homelab serve           # re-add tailnet proxies (Headlamp :443, Grafana :8443)
+homelab creds           # every service credential -> gitignored CREDENTIALS.md
+homelab pgweb-sync      # mirror both Postgres secrets into platform for pgweb
+homelab serve           # re-add tailnet proxies (Headlamp :443, Grafana :8443, Flowers Admin :8092)
 homelab join-cmd        # agent-node join one-liner
 homelab debug [svc]     # diagnostics bundle
 ```
@@ -167,5 +215,4 @@ curl -sfL https://get.k3s.io | K3S_URL=https://192.168.12.21:6443 \
 
 ## Known follow-ups
 - Jellyfin → Networking → **Known proxies** = `10.42.0.0/16` (real client IPs behind the tunnel).
-- Re-home the old Grafana/Prometheus stack onto k3s if wanted.
 - Dedicated `rpool/media` ZFS dataset once the USB (nearly full) gets tight.

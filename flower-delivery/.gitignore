@@ -1,0 +1,10 @@
+# local dev
+__pycache__/
+*.pyc
+
+# reference notes, not part of the app
+QUOTES.reference.md
+
+# never commit secrets — creds live in k8s Secrets
+*.secret.yaml
+secret.yaml

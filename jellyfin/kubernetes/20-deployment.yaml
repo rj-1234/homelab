@@ -73,14 +73,20 @@ spec:
               mountPath: /data/tvshows
               readOnly: true
               mountPropagation: HostToContainer
-            - name: dri
-              mountPath: /dev/dri
+            # New library on the rpool/data dataset (where *arr imports land).
+            - name: library
+              mountPath: /data/library
+              readOnly: true
+              mountPropagation: HostToContainer
           resources:
             requests:
               cpu: 250m
               memory: 512Mi
             limits:
               memory: 4Gi
+              # iGPU via the Intel device plugin (handles the device-cgroup allow
+              # that a bare hostPath /dev/dri cannot). Node advertises this.
+              gpu.intel.com/i915: "1"
           livenessProbe:
             httpGet:
               path: /health
@@ -111,7 +117,7 @@ spec:
           hostPath:
             path: /media/cheeky/seagate_hdd/TvShows
             type: Directory
-        - name: dri
+        - name: library
           hostPath:
-            path: /dev/dri
+            path: /srv/data/media
             type: Directory

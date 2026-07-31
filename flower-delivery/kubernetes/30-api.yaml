@@ -1,0 +1,62 @@
+---
+# Same no-build pattern as doc-catalog: stock python:3.12-slim, deps installed
+# at pod startup into an emptyDir, source hostPath-mounted read-only.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: flowers
+  labels: { app.kubernetes.io/name: api }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: api } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: api } }
+    spec:
+      nodeSelector: { kubernetes.io/hostname: cheeky-mini }
+      securityContext: { runAsUser: 1000, runAsGroup: 1000 }
+      initContainers:
+        - name: deps
+          image: python:3.12-slim
+          command: ["sh", "-c"]
+          args:
+            - pip install --target=/deps --no-cache-dir
+              'psycopg[binary]>=3.2' 'fastapi>=0.115' 'uvicorn[standard]>=0.32'
+          volumeMounts: [{ name: deps, mountPath: /deps }]
+      containers:
+        - name: api
+          image: python:3.12-slim
+          command: ["python", "-m", "uvicorn", "flowers.api:app", "--host", "0.0.0.0", "--port", "8000"]
+          envFrom:
+            - secretRef: { name: flowers-postgres }
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)"
+            - { name: PYTHONPATH, value: /deps:/app/src }
+            - { name: PYTHONUNBUFFERED, value: "1" }
+          ports: [{ name: http, containerPort: 8000 }]
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - { name: deps, mountPath: /deps }
+            - { name: app, mountPath: /app, readOnly: true }
+          resources:
+            requests: { cpu: 25m, memory: 128Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - { name: deps, emptyDir: {} }
+        - name: app
+          hostPath: { path: /home/cheeky/github/homelab/flower-delivery, type: Directory }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: flowers
+  labels: { app.kubernetes.io/name: api }
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: api }
+  ports: [{ name: http, port: 8000, targetPort: http }]

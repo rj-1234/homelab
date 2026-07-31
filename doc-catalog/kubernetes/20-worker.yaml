@@ -1,0 +1,70 @@
+---
+# Ingest + text-extraction worker. Handles inbox/Gmail ingest and the fast
+# `text` stage (PDF text layer, plain text, and Office formats — all pure-python
+# wheels), then enqueues `ocr`/`embed` for the specialized workers to drain. No
+# OCR here, so it needs no CV system libs: plain python:3.12-slim, deps
+# pip-installed into an emptyDir + app source hostPath-mounted. Pinned to
+# cheeky-mini (repo + /srv/docs dataset live here).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: docs
+  labels: { app.kubernetes.io/name: worker }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # single writer over the inbox/blobs
+  selector: { matchLabels: { app.kubernetes.io/name: worker } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: worker } }
+    spec:
+      nodeSelector: { kubernetes.io/hostname: cheeky-mini }
+      securityContext: { runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000 }
+      initContainers:
+        - name: deps
+          image: python:3.12-slim
+          command: ["sh", "-c"]
+          args:
+            # Text/ingest deps only. OCR (RapidOCR) lives in 25-ocr-worker.yaml.
+            - pip install --target=/deps --no-cache-dir
+              'psycopg[binary]>=3.2' puremagic 'pymupdf>=1.24'
+              python-docx python-pptx openpyxl xlrd
+              google-api-python-client google-auth
+          volumeMounts: [{ name: deps, mountPath: /deps }]
+      containers:
+        - name: worker
+          image: python:3.12-slim
+          command: ["python", "-m", "doccat.worker"]
+          envFrom:
+            - secretRef: { name: doccat-postgres }
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)"
+            - { name: DOCS_ROOT, value: /srv/docs }
+            # Ingest + the fast text stage. OCR and embedding are drained by the
+            # ocr-worker (25) and embed-worker (60) so neither blocks ingest.
+            - { name: WORKER_STAGES, value: "text" }
+            - { name: WORKER_INGEST, value: "true" }
+            - { name: HOME, value: /tmp }        # writable HOME for any lib cache
+            - { name: PYTHONPATH, value: "/deps:/app/src" }
+            - { name: PYTHONUNBUFFERED, value: "1" }
+          volumeMounts:
+            - { name: deps, mountPath: /deps }
+            - { name: app, mountPath: /app, readOnly: true }
+            - { name: docs, mountPath: /srv/docs }
+            # Gmail token files (one per account), mounted read-only. Optional:
+            # if the secret is absent the deploy still runs (gmail.poll no-ops).
+            - { name: gmail, mountPath: /secrets/gmail, readOnly: true }
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { memory: 1Gi }   # text/office extraction is light
+      volumes:
+        - { name: deps, emptyDir: {} }
+        - name: app
+          hostPath: { path: /home/cheeky/github/homelab/doc-catalog, type: Directory }
+        - name: docs
+          hostPath: { path: /srv/docs, type: Directory }
+        - name: gmail
+          secret:
+            secretName: doccat-gmail
+            optional: true   # deploy works before the secret is created

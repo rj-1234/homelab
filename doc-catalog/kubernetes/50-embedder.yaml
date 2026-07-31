@@ -1,0 +1,74 @@
+---
+# Embedding service: bge-base-en-v1.5 on CPU. Own pod (memory isolation from the
+# OCR worker). No custom build — python:3.12-slim + pip into an emptyDir +
+# hostPath source, same pattern as the rest. The model (~440MB) plus the torch
+# CPU stack persist in the HF cache on /srv/docs so restarts skip the download.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: embedder
+  namespace: docs
+  labels: { app.kubernetes.io/name: embedder }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app.kubernetes.io/name: embedder } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: embedder } }
+    spec:
+      nodeSelector: { kubernetes.io/hostname: cheeky-mini }
+      securityContext: { runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000 }
+      initContainers:
+        - name: deps
+          image: python:3.12-slim
+          command: ["sh", "-c"]
+          args:
+            - pip install --target=/deps --no-cache-dir
+              'sentence-transformers>=3.0'
+              'fastapi>=0.115' 'uvicorn[standard]>=0.32'
+          volumeMounts: [{ name: deps, mountPath: /deps }]
+      containers:
+        - name: embedder
+          image: python:3.12-slim
+          command: ["python", "-m", "uvicorn", "doccat.embedder:app",
+                    "--host", "0.0.0.0", "--port", "8000"]
+          env:
+            - { name: PYTHONPATH, value: /deps:/app/src }
+            - { name: PYTHONUNBUFFERED, value: "1" }
+            # HF weights cache on the dataset so restarts skip the re-download.
+            - { name: HF_HOME, value: /srv/docs/.models }
+            - { name: EMBED_THREADS, value: "6" }
+            # 512 tokens is ample for classification (gte-base handles 8192);
+            # page-level chunks (when enabled) are short anyway.
+            - { name: EMBED_MAX_TOKENS, value: "512" }
+          ports: [{ name: http, containerPort: 8000 }]
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            failureThreshold: 40   # first run downloads the model before it's ready
+          volumeMounts:
+            - { name: deps, mountPath: /deps }
+            - { name: app, mountPath: /app, readOnly: true }
+            - { name: docs, mountPath: /srv/docs }
+          resources:
+            requests: { cpu: 500m, memory: 512Mi }
+            limits: { memory: 2Gi }   # gte-base (~440MB) fp32 + torch activations
+      volumes:
+        - { name: deps, emptyDir: {} }
+        - name: app
+          hostPath: { path: /home/cheeky/github/homelab/doc-catalog, type: Directory }
+        - name: docs
+          hostPath: { path: /srv/docs, type: Directory }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: embedder
+  namespace: docs
+  labels: { app.kubernetes.io/name: embedder }
+spec:
+  type: ClusterIP
+  clusterIP: 10.43.200.32
+  selector: { app.kubernetes.io/name: embedder }
+  ports: [{ name: http, port: 8000, targetPort: http }]

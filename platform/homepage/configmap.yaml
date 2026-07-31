@@ -24,8 +24,20 @@ data:
         icon: mdi-play-circle-outline
         style: row
         columns: 2
+      Downloads:
+        icon: mdi-download-circle-outline
+        style: row
+        columns: 1
+      Documents:
+        icon: mdi-file-document-multiple-outline
+        style: row
+        columns: 1
       Infrastructure:
         icon: mdi-server
+        style: row
+        columns: 2
+      Gifts:
+        icon: mdi-flower-tulip-outline
         style: row
         columns: 2
 
@@ -36,6 +48,20 @@ data:
             description: Movies & TV
             icon: jellyfin.png
             siteMonitor: http://jellyfin.media.svc.cluster.local:8096
+            statusStyle: dot
+    - Downloads:
+        - qBittorrent:
+            href: https://cheeky-mini.tail2f4253.ts.net:8080
+            description: Torrent client · no VPN
+            icon: qbittorrent.png
+            siteMonitor: http://10.43.200.23:8080
+            statusStyle: dot
+    - Documents:
+        - Field Vault:
+            href: https://cheeky-mini.tail2f4253.ts.net:8091
+            description: Vault · library · semantic search
+            icon: mdi-shield-key-outline
+            siteMonitor: http://10.43.200.33:8080
             statusStyle: dot
     - Infrastructure:
         - Headlamp:
@@ -50,10 +76,29 @@ data:
             icon: grafana.png
             siteMonitor: http://10.43.200.10:80
             statusStyle: dot
+        - pgweb:
+            href: https://cheeky-mini.tail2f4253.ts.net:8081
+            description: Docs + Flowers DB · tables, rows, read-only SQL
+            icon: mdi-database-search-outline
+            siteMonitor: http://pgweb.platform.svc.cluster.local:8081
+            statusStyle: dot
         - Cloudflare Tunnel:
             href: https://one.dash.cloudflare.com
             description: Public ingress · ch33ky.org
             icon: cloudflare-zero-trust.png
+    - Gifts:
+        - Flowers:
+            href: https://flowers.ch33ky.org
+            description: Digital flower delivery · tie a bouquet, choose how long it lasts
+            icon: mdi-flower-tulip-outline
+            siteMonitor: http://public-web.flowers.svc.cluster.local:8080
+            statusStyle: dot
+        - Flowers Admin:
+            href: https://cheeky-mini.tail2f4253.ts.net:8092
+            description: Sent bouquets · tailnet-only
+            icon: mdi-flower-outline
+            siteMonitor: http://admin-web.flowers.svc.cluster.local:8080
+            statusStyle: dot
 
   widgets.yaml: |
     - greeting:

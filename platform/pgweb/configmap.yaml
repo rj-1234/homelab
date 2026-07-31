@@ -1,0 +1,27 @@
+---
+# Bookmark connections for the shared pgweb (see deployment.yaml). Each file
+# becomes one entry in pgweb's connection picker. uservar/passwordvar name
+# environment variables pgweb reads at connect time (populated via envFrom +
+# prefix in the Deployment) — credentials never appear in this ConfigMap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pgweb-bookmarks
+  namespace: platform
+data:
+  docs.toml: |
+    host = "postgres.docs.svc.cluster.local"
+    port = 5432
+    uservar = "DOCS_POSTGRES_USER"
+    passwordvar = "DOCS_POSTGRES_PASSWORD"
+    database = "doccat"
+    sslmode = "disable"
+    readonly = true
+  flowers.toml: |
+    host = "postgres.flowers.svc.cluster.local"
+    port = 5432
+    uservar = "FLOWERS_POSTGRES_USER"
+    passwordvar = "FLOWERS_POSTGRES_PASSWORD"
+    database = "flowers"
+    sslmode = "disable"
+    readonly = true
