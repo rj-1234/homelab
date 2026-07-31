@@ -122,3 +122,15 @@ def admin_list_gifts():
         row["opened_at"] = row["opened_at"].isoformat() if row["opened_at"] else None
         row["expires_at"] = row["expires_at"].isoformat() if row["expires_at"] else None
     return rows
+
+
+@app.delete("/api/admin/gifts/{gift_id}")
+def admin_delete_gift(gift_id: str):
+    row = _one("SELECT id FROM gifts WHERE id = %s", (gift_id,))
+    if row is None:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+
+    with db.connect() as c:
+        c.execute("DELETE FROM gifts WHERE id = %s", (gift_id,))
+
+    return {"ok": True}
