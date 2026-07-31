@@ -1,9 +1,8 @@
 ---
-# Decoupled UI: Caddy serves the SvelteKit static build and reverse-proxies the
-# JSON API + SSE stream to the api pod, so the browser talks to a single origin.
-# The build is produced on the host (`cd web && npm run build`) and hostPath-
-# mounted read-only — same no-Node-in-prod pattern as the rest. Runs in parallel
-# with the Python UI (api's HTML routes) until it reaches parity.
+# Decoupled UI: Caddy serves the React (Vite) static build and reverse-proxies
+# the JSON API + SSE stream to the api pod, so the browser talks to a single
+# origin. The build is produced on the host (`cd web && npm run build`) and
+# hostPath-mounted read-only — same no-Node-in-prod pattern as the rest.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -75,7 +74,7 @@ spec:
           configMap: { name: web-caddy }
         - name: web
           hostPath:
-            path: /home/cheeky/github/homelab/doc-catalog/web/build
+            path: /home/cheeky/github/homelab/doc-catalog/web/dist
             type: Directory
 ---
 apiVersion: v1

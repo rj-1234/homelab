@@ -1,0 +1,228 @@
+@import "tailwindcss";
+
+/* ============================================================================
+   "Scanner & Document Manager" palette — sourced from the ui-ux-pro-max
+   plugin's curated palette set (colors.csv row 109), deliberately not a
+   re-theme of the retired "Archive" (Newsreader/Graphite/Indigo) system.
+   Slate-navy chrome + scan-blue primary reads as a document tool; indigo and
+   rose are kept as *meaning* accents (vault/confirmed vs review/danger) the
+   same way Archive used --teal/--stamp, just re-hued to fit the new base.
+   Body/UI type is the system sans stack (no external font request); data/
+   masked values keep self-hosted IBM Plex Mono.
+   ========================================================================== */
+
+@font-face {
+  font-family: "Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/IBMPlexMono-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/IBMPlexMono-500.woff2") format("woff2");
+}
+
+:root {
+  color-scheme: light;
+  --radius: 0.625rem;
+
+  --background: #f8fafc;
+  --foreground: #0f172a;
+
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+
+  --primary: #1e293b;
+  --primary-foreground: #ffffff;
+
+  --secondary: #334155;
+  --secondary-foreground: #ffffff;
+
+  --muted: #f1f2f3;
+  --muted-foreground: #64748b;
+
+  --accent: #2563eb;
+  --accent-foreground: #ffffff;
+
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+
+  --border: #e4e5e7;
+  --input: #e4e5e7;
+  --ring: #1e293b;
+
+  /* meaning accents — not part of the sourced row, carried over from Archive's
+     semantic split (confirmed/vault vs review/danger) so the same visual
+     grammar survives the rewrite */
+  --vault: #4f46e5;
+  --vault-foreground: #ffffff;
+  --vault-wash: color-mix(in srgb, var(--vault) 10%, var(--card));
+  --danger: #e11d48;
+  --danger-wash: color-mix(in srgb, var(--danger) 10%, var(--card));
+  --success: #059669;
+  --success-foreground: #ffffff;
+
+  --font-mono: "Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0b1220;
+  --foreground: #f1f5f9;
+
+  --card: #131c2e;
+  --card-foreground: #f1f5f9;
+
+  --popover: #131c2e;
+  --popover-foreground: #f1f5f9;
+
+  --primary: #e2e8f0;
+  --primary-foreground: #0f172a;
+
+  --secondary: #334155;
+  --secondary-foreground: #f1f5f9;
+
+  --muted: #1a2436;
+  --muted-foreground: #94a3b8;
+
+  --accent: #60a5fa;
+  --accent-foreground: #0f172a;
+
+  --destructive: #f87171;
+  --destructive-foreground: #0f172a;
+
+  --border: #253046;
+  --input: #253046;
+  --ring: #60a5fa;
+
+  --vault: #8b84ff;
+  --vault-foreground: #0f172a;
+  --vault-wash: color-mix(in srgb, var(--vault) 16%, var(--card));
+  --danger: #fb7185;
+  --danger-wash: color-mix(in srgb, var(--danger) 15%, var(--card));
+  --success: #34d399;
+  --success-foreground: #0f172a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --background: #0b1220;
+    --foreground: #f1f5f9;
+    --card: #131c2e;
+    --card-foreground: #f1f5f9;
+    --popover: #131c2e;
+    --popover-foreground: #f1f5f9;
+    --primary: #e2e8f0;
+    --primary-foreground: #0f172a;
+    --secondary: #334155;
+    --secondary-foreground: #f1f5f9;
+    --muted: #1a2436;
+    --muted-foreground: #94a3b8;
+    --accent: #60a5fa;
+    --accent-foreground: #0f172a;
+    --destructive: #f87171;
+    --destructive-foreground: #0f172a;
+    --border: #253046;
+    --input: #253046;
+    --ring: #60a5fa;
+    --vault: #8b84ff;
+    --vault-foreground: #0f172a;
+    --vault-wash: color-mix(in srgb, var(--vault) 16%, var(--card));
+    --danger: #fb7185;
+    --danger-wash: color-mix(in srgb, var(--danger) 15%, var(--card));
+    --success: #34d399;
+    --success-foreground: #0f172a;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-vault: var(--vault);
+  --color-vault-foreground: var(--vault-foreground);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --font-mono: var(--font-mono);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* eyebrow — recurring section label: mono, spaced, with a trailing rule */
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-foreground);
+  margin: 0 0 0.75rem;
+}
+.eyebrow::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border), transparent);
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+@media (max-width: 620px) {
+  /* keep page content clear of the fixed mobile tab bar */
+  body {
+    padding-bottom: calc(58px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

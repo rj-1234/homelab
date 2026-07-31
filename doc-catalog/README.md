@@ -12,7 +12,7 @@ broker. Queue = Postgres `SELECT … FOR UPDATE SKIP LOCKED`. Blobs =
 content-addressed files. Search = `tsvector` + `pgvector` in the same DB. Live UI
 updates = Postgres `LISTEN/NOTIFY` → SSE (no polling).
 
-> The catalog **is** a personal field vault: a SvelteKit UI over the corpus —
+> The catalog **is** a personal field vault: a React UI over the corpus —
 > vault shelf (copy-ready fields), library with hybrid keyword/semantic search,
 > per-document detail, and a review queue. See
 > [VAULT_PLAN.md](VAULT_PLAN.md) for the design, security posture, IA and mockups.
@@ -52,7 +52,7 @@ flowchart LR
   embw --> pg
   fldw --> pg
   pg <-->|LISTEN/NOTIFY → SSE| api[api: JSON + SSE]
-  api --> web[web: SvelteKit SPA via Caddy]
+  api --> web[web: React SPA via Caddy]
   web --> user((tailnet user))
 ```
 
@@ -75,15 +75,20 @@ flowchart LR
   Hybrid search (`/api/documents?q=` — FTS `ts_rank` fused with pgvector cosine via
   reciprocal-rank fusion), document detail/update/delete, stage re-runs, taxonomy,
   and the field-vault endpoints. The old server-rendered HTML UI has been removed —
-  the SvelteKit SPA is the only UI.
-- **web** — Caddy sidecar serving the **SvelteKit** static build and reverse-
-  proxying `/api` + SSE to the api pod. Surfaces: **Vault** shelf (confirmed copy-
-  ready fields), **Library** (browse + hybrid keyword/semantic search + upload),
-  per-document **detail** (pipeline strip, stage re-runs, tag/manage, extracted
-  text, provenance, fields), **Review** queue, **Status**. "The Archive" design
-  system — self-hosted Newsreader + IBM Plex, SVG icons, a Graphite & Indigo
-  palette, and a persisted light/dark toggle. One SSE `EventSource` keeps every
-  page live (no polling).
+  the React SPA is the only UI.
+- **web** — Caddy sidecar serving the **React + Vite + TS + Tailwind + shadcn/ui**
+  static build and reverse-proxying `/api` + SSE to the api pod. Surfaces: **Vault**
+  shelf (confirmed copy-ready fields), **Library** (browse + hybrid keyword/semantic
+  search + upload), per-document **detail** (pipeline strip, stage re-runs,
+  tag/manage, extracted text, provenance, fields), **Review** queue, **Status**.
+  Rebuilt from a hand-rolled SvelteKit app onto shadcn/ui component primitives —
+  same stack as `flower-delivery/web` + `flower-delivery/admin` — with a
+  "Scanner & Document Manager" palette (slate-navy chrome, scan-blue accent, sourced
+  from the `ui-ux-pro-max` plugin's curated palette set) distinct from the retired
+  "Archive" system; self-hosted IBM Plex Mono carries over for masked/data values,
+  chrome uses the system sans stack (no external font request, matching the app's
+  tailnet-only/no-egress posture). Persisted light/dark toggle. One SSE
+  `EventSource` keeps every page live (no polling).
 - **postgres** — `pgvector/pgvector:pg16`: blobs, documents, pages, chunks
   (`vector(768)` + HNSW), tags, jobs, accounts, provenance, fields.
 
@@ -154,7 +159,7 @@ encryption** — values are plaintext at rest (tailnet-only; see VAULT_PLAN.md).
 
 `migration 006/007` add statement-level `NOTIFY doccat_events` triggers on
 job/document/account/field. `GET /api/events` (FastAPI SSE) LISTENs and streams the
-status snapshot on any change, with a 15s heartbeat. The SvelteKit UI holds one
+status snapshot on any change, with a 15s heartbeat. The React UI holds one
 `EventSource` — the job queue / shelf / Review badge update instantly. The
 document-detail page reacts to the same stream, so a **Re-run OCR / text / embed**
 or **Save** flips its pipeline pill and refreshes tags, text and fields in place —
