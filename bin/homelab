@@ -35,6 +35,7 @@ svc_map() {
     grafana)    echo "monitoring monitoring-grafana" ;;
     prometheus) echo "monitoring prometheus-monitoring-kube-prometheus-prometheus" ;;
     admin)      echo "flowers admin-web" ;;
+    pgweb)      echo "platform pgweb" ;;
     *) return 1 ;;
   esac
 }
@@ -137,6 +138,20 @@ cmd_creds() {  # gather every service credential into a gitignored CREDENTIALS.m
   } > "$out"
   info "wrote $out"
 }
+cmd_pgweb_sync() {  # mirror both Postgres secrets into platform for the shared pgweb bookmarks
+  need kubectl
+  command -v jq >/dev/null 2>&1 || die "jq is required (mirrors secret data without decoding it)"
+  _pgweb_mirror() {
+    local src_ns="$1" src_name="$2" dest_name="$3"
+    k -n "$src_ns" get secret "$src_name" -o json \
+      | jq --arg ns platform --arg name "$dest_name" \
+        '.metadata = {name: $name, namespace: $ns} | del(.status)' \
+      | k apply -f -
+  }
+  _pgweb_mirror docs doccat-postgres doccat-postgres-mirror
+  _pgweb_mirror flowers flowers-postgres flowers-postgres-mirror
+  info "mirrored doccat-postgres + flowers-postgres into platform for pgweb"
+}
 cmd_check_secrets() {
   need kubectl; local ok=0
   for s in "platform cloudflared-token" "monitoring grafana-admin"; do
@@ -176,6 +191,7 @@ Private (Tailscale):
   Grafana       https://$TAILNET_HOST:$GRAFANA_TS_PORT
   Flowers Admin https://$TAILNET_HOST:8092
   qBittorrent   https://$TAILNET_HOST:8080
+  pgweb         https://$TAILNET_HOST:8081
 
 LAN:
   Jellyfin      http://$(server_ip):8096
@@ -277,6 +293,7 @@ Creds & secrets:
   token [dur]          Headlamp login bearer token (default 168h)
   grafana-pw           print Grafana admin password
   creds                gather every service credential into gitignored CREDENTIALS.md
+  pgweb-sync           mirror doccat-postgres + flowers-postgres into platform for pgweb
   set-cf-token         paste + store a new cloudflared tunnel token, restart
   set-grafana-pw [pw]  set/rotate Grafana password (random if omitted)
   check-secrets        verify required secrets exist
@@ -296,7 +313,7 @@ Node-join & debug:
   join-cmd             print the agent-node join one-liner
   debug [svc]          diagnostics bundle (+ describe/logs for <svc>)
 
-svc = jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin
+svc = jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin | pgweb
 Config via env: HOMELAB_DOMAIN, HOMELAB_TAILNET_HOST, KUBECONFIG, ...
 EOF
 }
@@ -307,6 +324,7 @@ main() {
     token)          cmd_token "$@" ;;
     grafana-pw)     cmd_grafana_pw ;;
     creds)          cmd_creds ;;
+    pgweb-sync)     cmd_pgweb_sync ;;
     set-cf-token)   cmd_set_cf_token ;;
     set-grafana-pw) cmd_set_grafana_pw "$@" ;;
     check-secrets)  cmd_check_secrets ;;

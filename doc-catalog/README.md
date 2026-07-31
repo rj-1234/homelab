@@ -86,6 +86,11 @@ flowchart LR
   page live (no polling).
 - **postgres** — `pgvector/pgvector:pg16`: blobs, documents, pages, chunks
   (`vector(768)` + HNSW), tags, jobs, accounts, provenance, fields.
+
+DB browsing (read-only, tables/rows/SQL) is a shared `pgweb` instance covering
+both this DB and flower-delivery's — see `platform/pgweb/`, not something
+deployed per-app.
+
 ## Pipeline flow
 
 ```
@@ -199,6 +204,7 @@ Expose tailnet-only (host, sudo — no public ingress per principle #5):
 ```bash
 sudo tailscale serve --bg --https=8091 http://10.43.200.33:8080   # Vault / SPA (web)
 ```
+(pgweb is deployed and exposed separately, shared with flowers — see `platform/pgweb/`.)
 
 ### Optional integrations
 - **Gmail** — `doccat-gmail` holds one `token-<label>.json` (authorized_user,

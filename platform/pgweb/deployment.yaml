@@ -1,0 +1,87 @@
+---
+# Shared Postgres browser (pgweb) for both apps' databases — tables, row
+# counts, and read-only SQL, via pgweb's bookmark picker (bookmarks.yaml
+# ConfigMap mounted at /bookmarks) instead of one pgweb per app.
+# --bookmarks-only hides the manual-connect form; --readonly plus each
+# bookmark's own `readonly = true` both enforce read-only sessions.
+# Secrets are namespace-scoped, so both DB secrets are mirrored here from
+# their home namespaces via `homelab pgweb-sync` — re-run that if either
+# Postgres password ever rotates.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgweb
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: pgweb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pgweb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pgweb
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: cheeky-mini
+      containers:
+        - name: pgweb
+          image: sosedoff/pgweb:latest
+          args:
+            - pgweb
+            - --bind=0.0.0.0
+            - --listen=8081
+            - --readonly
+            - --bookmarks-dir=/bookmarks
+            - --bookmarks-only
+          envFrom:
+            - secretRef:
+                name: doccat-postgres-mirror
+              prefix: DOCS_
+            - secretRef:
+                name: flowers-postgres-mirror
+              prefix: FLOWERS_
+          ports:
+            - name: http
+              containerPort: 8081
+          volumeMounts:
+            - name: bookmarks
+              mountPath: /bookmarks
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: bookmarks
+          configMap:
+            name: pgweb-bookmarks
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgweb
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: pgweb
+spec:
+  type: ClusterIP
+  # Pinned to the IP the old docs-namespace pgweb already used, so the
+  # existing `tailscale serve --https=8081` binding keeps working unchanged.
+  clusterIP: 10.43.103.110
+  selector:
+    app.kubernetes.io/name: pgweb
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http

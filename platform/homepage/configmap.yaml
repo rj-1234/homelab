@@ -76,6 +76,12 @@ data:
             icon: grafana.png
             siteMonitor: http://10.43.200.10:80
             statusStyle: dot
+        - pgweb:
+            href: https://cheeky-mini.tail2f4253.ts.net:8081
+            description: Docs + Flowers DB · tables, rows, read-only SQL
+            icon: mdi-database-search-outline
+            siteMonitor: http://pgweb.platform.svc.cluster.local:8081
+            statusStyle: dot
         - Cloudflare Tunnel:
             href: https://one.dash.cloudflare.com
             description: Public ingress · ch33ky.org

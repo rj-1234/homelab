@@ -17,6 +17,7 @@ Creds & secrets
   token [dur]          Headlamp login bearer token (default 168h)
   grafana-pw           print Grafana admin password
   creds                gather every service credential into gitignored CREDENTIALS.md
+  pgweb-sync           mirror doccat-postgres + flowers-postgres into platform for pgweb
   set-cf-token         paste + store a new cloudflared token, restart connector
   set-grafana-pw [pw]  set/rotate Grafana password (random if omitted)
   check-secrets        verify required secrets exist
@@ -28,7 +29,7 @@ Status & URLs
 
 Deploy & serve
   apply [target]       kubectl apply  (jellyfin|platform|monitoring|all)
-  serve                (re)establish tailscale serve: Headlamp :443, Grafana :8443
+  serve                (re)establish tailscale serve: Headlamp :443, Grafana :8443, Flowers Admin :8092
   restart <svc>        rollout restart a service
   logs <svc> [-f]      tail a service's logs
 
@@ -37,12 +38,14 @@ Node-join & debug
   debug [svc]          diagnostics bundle (+ describe/logs for <svc>)
 ```
 
-`svc` = `jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin`
+`svc` = `jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin | pgweb`
 
 ## Config (env overrides)
 `KUBECONFIG` (default `/etc/rancher/k3s/k3s.yaml`), `HOMELAB_DOMAIN`,
 `HOMELAB_TAILNET_HOST`, `HOMELAB_GRAFANA_TS_PORT`, `HOMELAB_HEADLAMP_IP`,
-`HOMELAB_GRAFANA_IP`.
+`HOMELAB_GRAFANA_IP`, `HOMELAB_ADMIN_IP`.
+
+`pgweb-sync` requires `jq` (mirrors secret data between namespaces without decoding it).
 
 ## Examples
 ```bash
