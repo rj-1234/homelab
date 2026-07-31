@@ -22,3 +22,8 @@ export async function fetchGifts(): Promise<Gift[]> {
   if (!res.ok) throw new Error(`Failed to load gifts (${res.status})`);
   return res.json();
 }
+
+export async function deleteGift(id: string): Promise<void> {
+  const res = await fetch(`/api/admin/gifts/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Failed to delete gift (${res.status})`);
+}

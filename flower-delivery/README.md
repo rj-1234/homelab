@@ -35,7 +35,7 @@ web/            Vite + React + TS, public compose + gift pages
   src/pages/        Compose.tsx (species picker, notes, lifetime picker),
                     Gift.tsx (arrive/gift/keepsake flow, water/wind/tap/
                     ambience interactions, dev scrubber)
-admin/          Vite + vanilla TS, read-only admin dashboard (see below)
+admin/          Vite + React + TS + Tailwind + shadcn/ui, admin dashboard (see below)
 src/flowers/    FastAPI backend — api.py (routes), db.py (psycopg3), migrate.py
 migrations/     SQL migrations, applied via `python -m flowers.migrate`
 kubernetes/     no-image-build k8s manifests (hostPath + Caddy), see below
@@ -58,13 +58,20 @@ One table, `gifts`: `id` (short unguessable slug), `stems` (jsonb array of
   the id doesn't exist at all.
 - `GET /api/admin/gifts` — every gift, newest first, with a computed
   `status` (`not_opened` / `live` / `expired`). Powers the admin dashboard.
+- `DELETE /api/admin/gifts/:id` — permanently deletes a gift row; the link
+  404s for any recipient immediately after. 404 if the id doesn't exist.
 
 ## Admin dashboard
 
-Read-only table of every gift ever created (sender, message, stems+notes,
-lifetime, created/opened/expires timestamps, status, copy-link). No mutating
-actions — composing is already public, this is just visibility. Tailnet-only
-at `https://cheeky-mini.tail2f4253.ts.net:8092`. Its Service ClusterIP is
+KPI stat cards (total/live/not-opened/expired, animated count-up) plus a
+card grid of every gift ever created (sender, message, stems+notes,
+lifetime, created/opened/expires timestamps, status, copy-link, and a
+delete action gated behind a confirm dialog — the link stops working and
+the row is gone from Postgres immediately). Built with React + Tailwind +
+shadcn/ui on its own palette (not the public site's Organic system — see
+`admin/src/index.css`); GSAP drives the count-up/stagger-in motion,
+respecting `prefers-reduced-motion`. Tailnet-only at
+`https://cheeky-mini.tail2f4253.ts.net:8092`. Its Service ClusterIP is
 pinned to `10.43.13.38`.
 
 ## Deploy (no image build, same pattern as doc-catalog)
@@ -106,8 +113,12 @@ not something deployed per-app.
 
 ## Design system
 
-`web/src/styles/organic.css` and `admin/src/styles/organic.css` are verbatim
-copies of the "Organic" design system tokens from the original handoff
-(cream `#f5ead8`, terracotta `#c67139`, sage `#7a8a5e`, Caprasimo + Figtree).
-Kept as plain copies rather than a shared package since these are two
-independent Vite apps.
+`web/src/styles/organic.css` is a verbatim copy of the "Organic" design
+system tokens from the original handoff (cream `#f5ead8`, terracotta
+`#c67139`, sage `#7a8a5e`, Caprasimo + Figtree) — the public gift/compose
+pages only.
+
+`admin/` deliberately does **not** use Organic — it's shadcn/ui + Tailwind
+on its own light "Analytics Dashboard" palette (`admin/src/index.css`),
+sourced from the `ui-ux-pro-max` plugin's palette set rather than the
+product's brand, since this is an internal tool, not customer-facing.
