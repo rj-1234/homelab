@@ -24,7 +24,7 @@ labels/affinity.
 | Boot/data disk | 1 TB NVMe, **ZFS-on-root** (ZSys); `rpool` ~816 GB free |
 | Media disk | 1 TB USB Seagate, **NTFS** (ntfs-3g), mounted `/media/cheeky/seagate_hdd`, read-only to pods |
 | OS | Ubuntu 24.04 desktop (also a daily debugging machine — changes kept reversible) |
-| Kubernetes | k3s v1.36, `--snapshotter=native` (required on ZFS), `--disable traefik`, ServiceLB/klipper kept |
+| Kubernetes | k3s v1.36, `--snapshotter=native` (required on ZFS), ServiceLB/klipper + Traefik (bundled ingress) both kept |
 
 ---
 
@@ -158,7 +158,7 @@ retired pre-k3s docker-compose stacks (plex/portainer/etc.) · **main** = legacy
 
 ## Deploy from scratch
 
-Prereqs: k3s installed (`--snapshotter=native --disable traefik`), USB media
+Prereqs: k3s installed (`--snapshotter=native`), USB media
 mounted via fstab, node labeled `kubectl label node cheeky-mini homelab/media-store=seagate`.
 
 ```bash
@@ -170,6 +170,10 @@ kubectl apply -k jellyfin/kubernetes/
 # Platform: namespace, Headlamp, Homepage
 kubectl apply -f platform/00-namespace.yaml
 kubectl apply -f platform/headlamp/ -f platform/homepage/
+
+# Traefik dashboard (ingress itself is k3s-bundled; this just wires up the
+# dashboard/API privately — see platform/traefik/)
+kubectl apply -f platform/traefik/
 
 # Cloudflare Tunnel (token from your tunnel; see cloudflare-tunnel/Readme.md)
 kubectl -n platform create secret generic cloudflared-token --from-literal=token='<TOKEN>'
@@ -197,7 +201,7 @@ homelab status          # nodes, pods, cloudflared, tailscale
 homelab urls            # all service URLs
 homelab creds           # every service credential -> gitignored CREDENTIALS.md
 homelab pgweb-sync      # mirror both Postgres secrets into platform for pgweb
-homelab serve           # re-add tailnet proxies (Headlamp :443, Grafana :8443, Flowers Admin :8092)
+homelab serve           # re-add tailnet proxies (Headlamp :443, Grafana :8443, Flowers Admin :8092, Traefik :8444)
 homelab join-cmd        # agent-node join one-liner
 homelab debug [svc]     # diagnostics bundle
 ```
