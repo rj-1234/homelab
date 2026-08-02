@@ -19,12 +19,16 @@ labels/affinity.
 
 | | |
 |---|---|
-| Host | `cheeky-mini`, Intel i7-12650H (10c/16t), 32 GB RAM |
+| Host | `cheeky-mini` (control-plane), Intel i7-12650H (10c/16t), 32 GB RAM |
 | GPU | Intel Alder Lake iGPU (`/dev/dri/renderD128`) — used for HW transcode |
 | Boot/data disk | 1 TB NVMe, **ZFS-on-root** (ZSys); `rpool` ~816 GB free |
 | Media disk | 1 TB USB Seagate, **NTFS** (ntfs-3g), mounted `/media/cheeky/seagate_hdd`, read-only to pods |
 | OS | Ubuntu 24.04 desktop (also a daily debugging machine — changes kept reversible) |
 | Kubernetes | k3s v1.36, `--snapshotter=native` (required on ZFS), ServiceLB/klipper + Traefik (bundled ingress) both kept |
+| Host | `cheeky` (agent), Intel i5-12600K (10c/16t), 31 GB RAM |
+| GPU | NVIDIA RTX 3080 — labeled `homelab/gpu=rtx3080`, targeted by the vLLM Deployment in `openclaw/kubernetes/`; needs host-level NVIDIA driver + `nvidia-container-toolkit` before it'll actually schedule |
+| Disk | 478 GB NVMe (root) |
+| OS | Pop!_OS 22.04 desktop (dual-boot with Windows) |
 
 ---
 
@@ -44,7 +48,7 @@ flowchart TB
 
     ts[Tailscale tailnet - tail2f4253.ts.net]
 
-    subgraph node [cheeky-mini - k3s single node]
+    subgraph node [cheeky-mini - k3s control-plane]
         cfd[cloudflared x2 - platform ns]
         subgraph media [namespace: media]
             jelly[Jellyfin - LoadBalancer :8096]
@@ -64,8 +68,17 @@ flowchart TB
         subgraph monitoring [namespace: monitoring]
             graf[Grafana + Prometheus]
         end
+        subgraph openclaw [namespace: openclaw]
+            oc[OpenClaw :8080/:3000]
+            owui[Open WebUI :8080]
+        end
         usb[(USB NTFS media - read-only)]
         zfs[(rpool ZFS - local-path PVCs)]
+    end
+
+    subgraph node2 [cheeky - k3s agent, labeled homelab/gpu=rtx3080]
+        vllm[vLLM :8000 - Qwen2.5-7B-Instruct-AWQ, namespace: openclaw]
+        gpu[(NVIDIA RTX 3080)]
     end
 
     user -->|home.ch33ky.org| access --> tunnel
@@ -82,7 +95,12 @@ flowchart TB
     ts -->|Grafana https :8443| graf
     ts -->|qBittorrent https :8080| qbit
     ts -->|Flowers Admin https :8092| flow
+    ts -->|OpenClaw https :8093| oc
+    ts -->|Open WebUI https :8094| owui
     ts -.-> jelly
+    oc --> vllm
+    owui --> vllm
+    vllm --> gpu
     vault --> zfs
     flow --> zfs
     jelly --> usb
@@ -104,7 +122,10 @@ flowchart TB
   port so the binding survives redeploys: **Headlamp** (`:443`), **Field
   Vault** (`:8091`), **Flowers Admin** (`:8092`), **Grafana** (`:8443`),
   **qBittorrent** (`:8080`), **pgweb** (`:8081`, shared DB browser for both
-  Postgres instances). None of these are ever public.
+  Postgres instances), **OpenClaw** (`:8093`), **Open WebUI** (`:8094`). None
+  of these are ever public — the vLLM inference endpoint itself isn't even
+  tailnet-exposed, it's cluster-internal only (OpenClaw and Open WebUI are
+  the only things that talk to it directly).
 
 ### Secrets
 No secrets in the repo. The Cloudflare connector token lives in a k8s Secret
@@ -126,6 +147,9 @@ files; `*.example.yaml` templates are the only committed config stand-ins.
 | **Field Vault** (doc-catalog) | `docs` | tailnet-only (`tailscale serve :8091`) | Personal document + PII vault. Postgres-only pipeline (ingest → OCR → embed → tag → PII extract), FTS + pgvector hybrid search, Gmail ingest, Presidio field extraction. SvelteKit UI, realtime via SSE. All models on-node, **no public egress**. Own docs + manifests: [doc-catalog/](doc-catalog/README.md). |
 | **Flowers** (flower-delivery) | `flowers` | `flowers.ch33ky.org` (public) | Digital flower gift app. Public compose page (pick up to 5-13 stems from 7 species, pin notes, write a message, choose how long the link stays open); `/g/:id` replays a 60s procedural-SVG bloom→wilt→petal-fall cycle while the link is alive, then permanently shows a pressed-flower keepsake. React + TS frontend, FastAPI + Postgres backend. Read-only admin list of every gift sent lives at **Flowers Admin** (same `flowers` namespace, tailnet-only `:8092`). Own code: [flower-delivery/](flower-delivery/). |
 | **qBittorrent** (arr stack) | `media` | tailnet-only (`:8080`) | Standalone torrent client behind a gluetun VPN kill-switch — manual downloads, no indexer/auto-organize automation (Radarr/Sonarr/Prowlarr were dropped as unneeded). See [arr/kubernetes/README.md](arr/kubernetes/README.md). |
+| **vLLM** | `openclaw` | cluster-internal only | Self-hosted OpenAI-compatible inference endpoint on `cheeky`'s RTX 3080, `nvidia.com/gpu: 1`. Model/quant/context-length/tool-parser are env vars (default `Qwen/Qwen2.5-7B-Instruct-AWQ`, AWQ 4-bit) so swapping models is a rollout restart, not a manifest edit. HF weights cached on a `cheeky` hostPath. Auth via `vllm-api-key` Secret. |
+| **OpenClaw** | `openclaw` | tailnet-only (`:8093`) | Agentic AI-assistant orchestration stack (NATS gateway + Admin API + Web UI), configured against the in-cluster vLLM endpoint instead of a hosted model provider. Runs on `cheeky-mini` (no GPU needed). |
+| **Open WebUI** | `openclaw` | tailnet-only (`:8094`) | Chat frontend straight onto the vLLM endpoint, for model testing/debugging independent of the OpenClaw agent loop. |
 
 ---
 
@@ -139,6 +163,7 @@ platform/
   homepage/                Homepage Deployment/Service + config ConfigMap + discovery RBAC
   pgweb/                   Shared read-only Postgres browser (both apps' DBs) + bookmarks ConfigMap
   monitoring/              Grafana + Prometheus (kube-prometheus-stack Helm values)
+  nvidia-gpu-plugin/       NVIDIA k8s device plugin (remote kustomize base, pinned to cheeky)
 cloudflare-tunnel/
   kubernetes/              cloudflared Deployment + values.example.yaml (token via Secret)
   Readme.md                tunnel setup + dashboard routing
@@ -148,6 +173,7 @@ doc-catalog/               Personal document + field vault — own README, k8s i
 flower-delivery/           Digital flower gift app — FastAPI+Postgres in src/,
                            React+TS in web/, read-only admin dashboard in admin/
 arr/kubernetes/            qBittorrent (torrent client behind gluetun VPN) — own README
+openclaw/kubernetes/       vLLM (on cheeky) + OpenClaw + Open WebUI — namespace, Deployments, Services, kustomization
 bin/                       `homelab` management CLI — own README
 ```
 
@@ -180,6 +206,18 @@ kubectl -n platform create secret generic cloudflared-token --from-literal=token
 kubectl apply -f cloudflare-tunnel/kubernetes/cloudflared-deployment.yaml
 ```
 
+OpenClaw + vLLM (needs `cheeky` GPU-wired first — NVIDIA driver +
+`nvidia-container-toolkit` installed on the host, see `homelab join-cmd`
+node-join docs and the comment in `platform/nvidia-gpu-plugin/kustomization.yaml`):
+
+```bash
+kubectl apply -f openclaw/kubernetes/00-namespace.yaml
+sudo mkdir -p /srv/openclaw/{vllm-cache,openclaw-memory,open-webui-data}
+kubectl -n openclaw create secret generic vllm-api-key --from-literal=key="$(openssl rand -hex 32)"
+kubectl -n openclaw create secret generic openclaw-admin-secret --from-literal=secret="$(openssl rand -hex 32)"
+homelab apply openclaw
+```
+
 Then: Tailscale ([tailscale/README.md](tailscale/README.md)) for private access +
 SSH, and configure Cloudflare public hostnames + Access
 ([cloudflare-tunnel/Readme.md](cloudflare-tunnel/Readme.md)).
@@ -201,7 +239,7 @@ homelab status          # nodes, pods, cloudflared, tailscale
 homelab urls            # all service URLs
 homelab creds           # every service credential -> gitignored CREDENTIALS.md
 homelab pgweb-sync      # mirror both Postgres secrets into platform for pgweb
-homelab serve           # re-add tailnet proxies (Headlamp :443, Grafana :8443, Flowers Admin :8092, Traefik :8444)
+homelab serve           # re-add tailnet proxies (Headlamp :443, Grafana :8443, Flowers Admin :8092, Traefik :8444, OpenClaw :8093, Open WebUI :8094)
 homelab join-cmd        # agent-node join one-liner
 homelab debug [svc]     # diagnostics bundle
 ```
@@ -209,7 +247,7 @@ homelab debug [svc]     # diagnostics bundle
 Raw equivalents if you prefer: `kubectl get pods -A`,
 `kubectl -n platform create token headlamp`, `tailscale serve status`.
 
-**Add an agent node** (future):
+**Add an agent node** — `cheeky` (i5-12600K, RTX 3080) joined this way, template for the next one:
 ```bash
 curl -sfL https://get.k3s.io | K3S_URL=https://192.168.12.21:6443 \
   K3S_TOKEN=$(sudo cat /var/lib/rancher/k3s/server/node-token) sh -
@@ -220,3 +258,11 @@ curl -sfL https://get.k3s.io | K3S_URL=https://192.168.12.21:6443 \
 ## Known follow-ups
 - Jellyfin → Networking → **Known proxies** = `10.42.0.0/16` (real client IPs behind the tunnel).
 - Dedicated `rpool/media` ZFS dataset once the USB (nearly full) gets tight.
+- `cheeky`'s RTX 3080 is labeled (`homelab/gpu=rtx3080`); manifests for the
+  device plugin (`platform/nvidia-gpu-plugin/`) and the vLLM/OpenClaw/Open
+  WebUI stack (`openclaw/kubernetes/`) are ready, but the NVIDIA driver +
+  `nvidia-container-toolkit` still need installing on the host itself before
+  `homelab apply openclaw` will actually schedule the vLLM pod there.
+- OpenClaw's image/env vars in `openclaw/kubernetes/20-openclaw.yaml` are
+  best-effort from third-party self-hosting guides (no official docs
+  checked) — verify against upstream before relying on them.

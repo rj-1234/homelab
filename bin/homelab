@@ -15,6 +15,8 @@ HEADLAMP_IP="${HOMELAB_HEADLAMP_IP:-10.43.142.241}"   # pinned ClusterIP
 GRAFANA_IP="${HOMELAB_GRAFANA_IP:-10.43.200.10}"       # pinned ClusterIP
 ADMIN_IP="${HOMELAB_ADMIN_IP:-10.43.13.38}"            # pinned ClusterIP (Flowers Admin)
 TRAEFIK_IP="${HOMELAB_TRAEFIK_IP:-10.43.200.40}"       # pinned ClusterIP (dashboard/API, port 8080)
+OPENCLAW_IP="${HOMELAB_OPENCLAW_IP:-10.43.200.51}"     # pinned ClusterIP (OpenClaw Web UI, port 8080)
+OPENWEBUI_IP="${HOMELAB_OPENWEBUI_IP:-10.43.200.52}"   # pinned ClusterIP (Open WebUI, port 8080)
 # repo root = parent of this script's dir
 REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 
@@ -37,6 +39,9 @@ svc_map() {
     prometheus) echo "monitoring prometheus-monitoring-kube-prometheus-prometheus" ;;
     admin)      echo "flowers admin-web" ;;
     pgweb)      echo "platform pgweb" ;;
+    vllm)       echo "openclaw vllm" ;;
+    openclaw)   echo "openclaw openclaw" ;;
+    open-webui) echo "openclaw open-webui" ;;
     *) return 1 ;;
   esac
 }
@@ -194,6 +199,8 @@ Private (Tailscale):
   qBittorrent   https://$TAILNET_HOST:8080
   pgweb         https://$TAILNET_HOST:8081
   Traefik       https://$TAILNET_HOST:8444/dashboard/
+  OpenClaw      https://$TAILNET_HOST:8093
+  Open WebUI    https://$TAILNET_HOST:8094
 
 LAN:
   Jellyfin      http://$(server_ip):8096
@@ -208,6 +215,8 @@ cmd_health() {
     [headlamp]="http://$HEADLAMP_IP:80/"
     [grafana]="http://$GRAFANA_IP:80/api/health"
     [traefik]="http://$TRAEFIK_IP:8080/ping"
+    [vllm]="http://vllm.openclaw.svc.cluster.local:8000/health"
+    [open-webui]="http://$OPENWEBUI_IP:8080/health"
   )
   for name in "${!t[@]}"; do
     code=$(k -n platform run hl-health-$$-"$name" --rm -i --restart=Never -q \
@@ -228,8 +237,10 @@ cmd_apply() {
                 k apply -f "$REPO/platform/traefik/" ;;
     monitoring) k apply -f "$REPO/platform/monitoring/grafana-tailnet-svc.yaml"
                 warn "helm-managed stack: use 'helm upgrade' with platform/monitoring/values.yaml" ;;
-    all)        cmd_apply jellyfin; cmd_apply platform; cmd_apply monitoring ;;
-    *) die "unknown target: $1 (jellyfin|platform|monitoring|all)" ;;
+    openclaw)   k apply -k "$REPO/platform/nvidia-gpu-plugin/"
+                k apply -k "$REPO/openclaw/kubernetes/" ;;
+    all)        cmd_apply jellyfin; cmd_apply platform; cmd_apply monitoring; cmd_apply openclaw ;;
+    *) die "unknown target: $1 (jellyfin|platform|monitoring|openclaw|all)" ;;
   esac
 }
 cmd_serve() {  # idempotent tailnet exposure for admin UIs
@@ -238,7 +249,9 @@ cmd_serve() {  # idempotent tailnet exposure for admin UIs
   sudo tailscale serve --bg --https="$GRAFANA_TS_PORT" "http://$GRAFANA_IP:80"
   sudo tailscale serve --bg --https=8092 "http://$ADMIN_IP:8080"
   sudo tailscale serve --bg --https=8444 "http://$TRAEFIK_IP:8080"
-  info "serving Headlamp :443 + Grafana :$GRAFANA_TS_PORT + Flowers Admin :8092 + Traefik :8444 on $TAILNET_HOST"
+  sudo tailscale serve --bg --https=8093 "http://$OPENCLAW_IP:8080"
+  sudo tailscale serve --bg --https=8094 "http://$OPENWEBUI_IP:8080"
+  info "serving Headlamp :443 + Grafana :$GRAFANA_TS_PORT + Flowers Admin :8092 + Traefik :8444 + OpenClaw :8093 + Open WebUI :8094 on $TAILNET_HOST"
   sudo tailscale serve status
 }
 cmd_restart() {
@@ -309,8 +322,8 @@ Status & URLs:
   health               HTTP health check each service
 
 Deploy & serve:
-  apply [target]       kubectl apply  (jellyfin|platform|monitoring|all)
-  serve                (re)establish tailscale serve: Headlamp :443, Grafana :$GRAFANA_TS_PORT, Flowers Admin :8092, Traefik :8444
+  apply [target]       kubectl apply  (jellyfin|platform|monitoring|openclaw|all)
+  serve                (re)establish tailscale serve: Headlamp :443, Grafana :$GRAFANA_TS_PORT, Flowers Admin :8092, Traefik :8444, OpenClaw :8093, Open WebUI :8094
   restart <svc>        rollout restart a service
   logs <svc> [-f]      tail a service's logs
 
@@ -318,7 +331,7 @@ Node-join & debug:
   join-cmd             print the agent-node join one-liner
   debug [svc]          diagnostics bundle (+ describe/logs for <svc>)
 
-svc = jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin | pgweb
+svc = jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin | pgweb | vllm | openclaw | open-webui
 Config via env: HOMELAB_DOMAIN, HOMELAB_TAILNET_HOST, KUBECONFIG, ...
 EOF
 }

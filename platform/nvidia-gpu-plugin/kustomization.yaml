@@ -1,0 +1,16 @@
+---
+# NVIDIA GPU device plugin — advertises cheeky's RTX 3080 as nvidia.com/gpu.
+# Same remote-kustomize pattern as ../intel-gpu-plugin. Requires the NVIDIA
+# driver + nvidia-container-toolkit already installed on cheeky, and
+# containerd (k3s's runtime) configured with the nvidia RuntimeClass —
+# neither of which this plugin does for you; see cheeky's host setup notes
+# in README.md.
+#
+#   kubectl apply -k platform/nvidia-gpu-plugin/
+#
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.17.1/deployments/static/nvidia-device-plugin.yml
+patchesStrategicMerge:
+  - nodeselector-patch.yaml

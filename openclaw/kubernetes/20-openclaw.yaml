@@ -1,0 +1,71 @@
+---
+# OpenClaw agent orchestration stack (NATS gateway + Admin API + Web UI),
+# pointed at the in-cluster vLLM endpoint instead of a hosted model provider.
+# Image/env vars are best-effort from OpenClaw's public self-hosting guides —
+# it's a fast-moving project with no prior reference in this repo, so verify
+# the image tag and env var names against https://github.com/<openclaw-org>/openclaw
+# (or wherever upstream docs live) before first apply.
+#
+# Host prep on cheeky-mini before first apply:
+#   sudo mkdir -p /srv/openclaw/openclaw-memory
+#   kubectl -n openclaw create secret generic openclaw-admin-secret \
+#     --from-literal=secret="$(openssl rand -hex 32)"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openclaw
+  namespace: openclaw
+  labels: { app.kubernetes.io/name: openclaw }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app.kubernetes.io/name: openclaw } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: openclaw } }
+    spec:
+      nodeSelector: { kubernetes.io/hostname: cheeky-mini }
+      containers:
+        - name: openclaw
+          image: manishmshiva/openclaw:latest
+          env:
+            - { name: GATEWAY_HOST, value: "0.0.0.0" }
+            - { name: GATEWAY_PORT, value: "4222" }
+            - { name: ADMIN_API_PORT, value: "3000" }
+            - { name: OPENAI_BASE_URL, value: "http://vllm.openclaw.svc.cluster.local:8000/v1" }
+            - { name: DEFAULT_MODEL, value: "Qwen/Qwen2.5-7B-Instruct-AWQ" }
+            - { name: MEMORY_BACKEND, value: "sqlite" }
+            - { name: MEMORY_PATH, value: /data/memory }
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: vllm-api-key, key: key } }
+            - name: ADMIN_API_SECRET
+              valueFrom: { secretKeyRef: { name: openclaw-admin-secret, key: secret } }
+          ports:
+            - { name: gateway, containerPort: 4222 }
+            - { name: admin, containerPort: 3000 }
+            - { name: web, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /, port: web }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { memory: 1Gi }
+          volumeMounts:
+            - { name: memory, mountPath: /data/memory }
+      volumes:
+        - name: memory
+          hostPath: { path: /srv/openclaw/openclaw-memory, type: Directory }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openclaw-web
+  namespace: openclaw
+  labels: { app.kubernetes.io/name: openclaw }
+spec:
+  type: ClusterIP
+  clusterIP: 10.43.200.51
+  selector: { app.kubernetes.io/name: openclaw }
+  ports:
+    - { name: web, port: 8080, targetPort: web }
+    - { name: admin, port: 3000, targetPort: admin }
