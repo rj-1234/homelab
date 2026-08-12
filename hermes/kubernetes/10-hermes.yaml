@@ -7,13 +7,18 @@
 # into this repo — see README for the exact build/push commands.
 #
 # Two containers sharing this pod's network namespace replaces upstream's
-# docker-compose `network: host` + `depends_on` pattern: `dashboard` binds
-# 127.0.0.1 deliberately (holds API keys, upstream recommends SSH-tunnel
-# access) and reaches `gateway` over loopback, which a shared pod netns
-# gives for free without `hostNetwork: true`. Neither container needs a
-# Service — `gateway` makes only outbound connections (WhatsApp/Telegram/
-# etc. are all agent-initiated), and `dashboard` is loopback-only by
-# design; reach it with `kubectl -n hermes port-forward deploy/hermes 9119:9119`.
+# docker-compose `network: host` + `depends_on` pattern: `dashboard`
+# reaches `gateway` over loopback, which a shared pod netns gives for free
+# without `hostNetwork: true`. `gateway` makes only outbound connections
+# (WhatsApp/Telegram/etc. are all agent-initiated) and needs no Service.
+#
+# `dashboard` holds API keys — upstream binds it to 127.0.0.1 and
+# recommends SSH-tunnel-only access. We deviate deliberately: bound to
+# 0.0.0.0 here and exposed over the tailnet (`homelab serve`), same trust
+# level already given to every other admin UI in this repo (Headlamp,
+# Grafana, Traefik, Zot) — a Service can't reach a loopback-only bind
+# anyway, so 127.0.0.1 would mean kubectl-port-forward-only, which is a
+# real usability cost for a bar this repo doesn't hold anywhere else.
 #
 # Host prep on cheeky-mini before first apply:
 #   sudo mkdir -p /srv/hermes/data
@@ -62,7 +67,7 @@ spec:
             - { name: config, mountPath: /opt/data/config.yaml, subPath: config.yaml }
         - name: dashboard
           image: 10.43.200.51:5000/hermes-agent:v2026.8.3
-          args: ["dashboard", "--host", "127.0.0.1", "--no-open"]
+          args: ["dashboard", "--host", "0.0.0.0", "--no-open"]
           env:
             - { name: HERMES_UID, value: "10000" }
             - { name: HERMES_GID, value: "10000" }
@@ -75,3 +80,15 @@ spec:
           hostPath: { path: /srv/hermes/data, type: Directory }
         - name: config
           configMap: { name: hermes-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes-dashboard
+  namespace: hermes
+  labels: { app.kubernetes.io/name: hermes }
+spec:
+  type: ClusterIP
+  clusterIP: 10.43.200.53
+  selector: { app.kubernetes.io/name: hermes }
+  ports: [{ name: dashboard, port: 9119, targetPort: dashboard }]

@@ -135,6 +135,12 @@ data:
             icon: mdi-chat-processing-outline
             namespace: local-llm
             app: open-webui
+        - Hermes Agent:
+            href: https://cheeky-mini.tail2f4253.ts.net:8096
+            description: Agent dashboard · WhatsApp via vLLM · tailnet-only
+            icon: mdi-robot-excited-outline
+            namespace: hermes
+            app: hermes
     - Gifts:
         - Flowers:
             href: https://flowers.ch33ky.org
