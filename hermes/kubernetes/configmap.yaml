@@ -1,0 +1,26 @@
+---
+# Hermes Agent config (https://github.com/NousResearch/hermes-agent) —
+# model/provider config lives at $HERMES_HOME/config.yaml (HERMES_HOME=
+# /opt/data in the image). Mounted as a single file into the hostPath data
+# dir (10-hermes.yaml), doesn't clobber the rest of /opt/data (session DB,
+# lazy-installed packages, WhatsApp pairing state all live there too).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermes-config
+  namespace: hermes
+data:
+  config.yaml: |
+    model:
+      provider: custom
+      base_url: "http://vllm.local-llm.svc.cluster.local:8000/v1"
+      api_key: "${VLLM_API_KEY}"   # from the gateway container's env, see 10-hermes.yaml
+      default: "qwen2.5-7b-instruct-awq"
+      # local-llm's vLLM currently caps at 32768 (native Qwen2.5-7B window
+      # — a YaRN context-extension attempt broke output quality and was
+      # reverted, see the plan). Keep this in sync with vLLM's
+      # MAX_MODEL_LEN; raise it if that ceiling ever moves for real.
+      context_length: 32768
+    context_compression:
+      enabled: true
+      threshold: 0.85

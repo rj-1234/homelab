@@ -1,0 +1,73 @@
+---
+# Hermes Agent (https://github.com/NousResearch/hermes-agent) — agent
+# orchestrator on top of local-llm's vLLM endpoint, WhatsApp as the primary
+# channel. No GPU needed, kept off the GPU node deliberately.
+#
+# Image is built+pushed by hand from a pinned release tag, not vendored
+# into this repo — see README for the exact build/push commands.
+#
+# Two containers sharing this pod's network namespace replaces upstream's
+# docker-compose `network: host` + `depends_on` pattern: `dashboard` binds
+# 127.0.0.1 deliberately (holds API keys, upstream recommends SSH-tunnel
+# access) and reaches `gateway` over loopback, which a shared pod netns
+# gives for free without `hostNetwork: true`. Neither container needs a
+# Service — `gateway` makes only outbound connections (WhatsApp/Telegram/
+# etc. are all agent-initiated), and `dashboard` is loopback-only by
+# design; reach it with `kubectl -n hermes port-forward deploy/hermes 9119:9119`.
+#
+# Host prep on cheeky-mini before first apply:
+#   sudo mkdir -p /srv/hermes/data
+#   sudo chown 10000:10000 /srv/hermes/data
+#   kubectl -n hermes create secret generic vllm-api-key \
+#     --from-literal=key="$(kubectl -n local-llm get secret vllm-api-key -o jsonpath='{.data.key}' | base64 -d)"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes
+  namespace: hermes
+  labels: { app.kubernetes.io/name: hermes }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app.kubernetes.io/name: hermes } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: hermes } }
+    spec:
+      nodeSelector: { kubernetes.io/hostname: cheeky-mini }
+      enableServiceLinks: false
+      # 10000:10000 — the image's `hermes` user (upstream docker-compose
+      # default HERMES_UID/HERMES_GID). Confirm against the actual built
+      # image (`docker run --rm <image> id hermes`) before first apply.
+      securityContext:
+        runAsUser: 10000
+        runAsGroup: 10000
+        fsGroup: 10000
+      containers:
+        - name: gateway
+          image: 10.43.200.51:5000/hermes-agent:v2026.8.3
+          command: ["gateway", "run"]
+          env:
+            - { name: HERMES_UID, value: "10000" }
+            - { name: HERMES_GID, value: "10000" }
+            - { name: WHATSAPP_ENABLED, value: "true" }
+            - { name: WHATSAPP_ALLOWED_USERS, value: "+13472164621" }
+            - name: VLLM_API_KEY
+              valueFrom: { secretKeyRef: { name: vllm-api-key, key: key } }
+          volumeMounts:
+            - { name: data, mountPath: /opt/data }
+            - { name: config, mountPath: /opt/data/config.yaml, subPath: config.yaml }
+        - name: dashboard
+          image: 10.43.200.51:5000/hermes-agent:v2026.8.3
+          command: ["dashboard", "--host", "127.0.0.1", "--no-open"]
+          env:
+            - { name: HERMES_UID, value: "10000" }
+            - { name: HERMES_GID, value: "10000" }
+          ports: [{ name: dashboard, containerPort: 9119 }]
+          volumeMounts:
+            - { name: data, mountPath: /opt/data }
+            - { name: config, mountPath: /opt/data/config.yaml, subPath: config.yaml }
+      volumes:
+        - name: data
+          hostPath: { path: /srv/hermes/data, type: Directory }
+        - name: config
+          configMap: { name: hermes-config }

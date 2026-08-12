@@ -133,7 +133,7 @@ data:
             href: https://cheeky-mini.tail2f4253.ts.net:8094
             description: Chat UI onto vLLM (Qwen2.5-7B) · tailnet-only
             icon: mdi-chat-processing-outline
-            namespace: openclaw
+            namespace: local-llm
             app: open-webui
     - Gifts:
         - Flowers:

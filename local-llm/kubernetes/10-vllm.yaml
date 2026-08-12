@@ -1,5 +1,6 @@
 ---
-# Self-hosted OpenAI-compatible inference endpoint for OpenClaw + Open WebUI.
+# Self-hosted OpenAI-compatible inference endpoint — backs Open WebUI and,
+# going forward, Hermes Agent.
 # Model/quant/context/tool-parser are env vars, not baked into the command,
 # so swapping models is `kubectl set env` + `kubectl rollout restart`, not a
 # manifest edit. TOOL_CALL_PARSER must match the model family (hermes for
@@ -7,14 +8,14 @@
 # https://docs.vllm.ai/en/latest/features/tool_calling.html
 #
 # Host prep on cheeky before first apply:
-#   sudo mkdir -p /srv/openclaw/vllm-cache
-#   kubectl -n openclaw create secret generic vllm-api-key \
+#   sudo mkdir -p /srv/openclaw/vllm-cache   # path kept as-is post-rename, real cached weights live here
+#   kubectl -n local-llm create secret generic vllm-api-key \
 #     --from-literal=key="$(openssl rand -hex 32)"
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: vllm
-  namespace: openclaw
+  namespace: local-llm
   labels: { app.kubernetes.io/name: vllm }
 spec:
   replicas: 1
@@ -58,13 +59,14 @@ spec:
             # failed. Raise this if the model changes and fits with room to
             # spare.
             - { name: GPU_MEM_UTIL, value: "0.80" }
-            # OpenClaw hard-refuses any model with contextWindow < 16000
-            # ("FailoverError: Model context window too small"), and warns
-            # below 32000. 16384 technically cleared the hard floor but the
-            # system prompt + full tool-schema set alone already eats ~7-8k
-            # tokens before any conversation — real requests overflowed and
-            # died as a raw connection failure. Must stay in sync with
-            # `contextWindow` in the pre-seeded openclaw.json provider block.
+            # Tried pushing this to 65536 via static YaRN RoPE scaling
+            # (factor 2.0) + fp8 KV-cache to fit it — vLLM booted fine and
+            # reported healthy KV-cache sizing, but real prompts degenerated
+            # into repetition-loop garbage (classic RoPE-extrapolation
+            # failure mode). Reverted. 32768 is Qwen2.5-7B-Instruct's native
+            # trained context — stay within it until a real long-context
+            # checkpoint (or calibrated fp8 KV-cache tested in isolation,
+            # without YaRN) replaces this, don't re-add YaRN blind.
             - { name: MAX_MODEL_LEN, value: "32768" }
             - { name: TOOL_CALL_PARSER, value: "hermes" }
             - { name: HF_HOME, value: /root/.cache/huggingface }
@@ -89,7 +91,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: vllm
-  namespace: openclaw
+  namespace: local-llm
   labels: { app.kubernetes.io/name: vllm }
 spec:
   type: ClusterIP

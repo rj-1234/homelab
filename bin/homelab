@@ -39,9 +39,10 @@ svc_map() {
     prometheus) echo "monitoring prometheus-monitoring-kube-prometheus-prometheus" ;;
     admin)      echo "flowers admin-web" ;;
     pgweb)      echo "platform pgweb" ;;
-    vllm)       echo "openclaw vllm" ;;
-    open-webui) echo "openclaw open-webui" ;;
+    vllm)       echo "local-llm vllm" ;;
+    open-webui) echo "local-llm open-webui" ;;
     zot)        echo "platform zot" ;;
+    hermes)     echo "hermes hermes" ;;
     *) return 1 ;;
   esac
 }
@@ -204,6 +205,9 @@ Private (Tailscale):
 
 LAN:
   Jellyfin      http://$(server_ip):8096
+
+Hermes dashboard (loopback-only by design, not tailnet-served):
+  kubectl -n hermes port-forward deploy/hermes 9119:9119
 EOF
 }
 cmd_health() {
@@ -215,7 +219,7 @@ cmd_health() {
     [headlamp]="http://$HEADLAMP_IP:80/"
     [grafana]="http://$GRAFANA_IP:80/api/health"
     [traefik]="http://$TRAEFIK_IP:8080/ping"
-    [vllm]="http://vllm.openclaw.svc.cluster.local:8000/health"
+    [vllm]="http://vllm.local-llm.svc.cluster.local:8000/health"
     [open-webui]="http://$OPENWEBUI_IP:8080/health"
     [zot]="http://$ZOT_IP:5000/v2/"
   )
@@ -240,9 +244,10 @@ cmd_apply() {
     monitoring) k apply -f "$REPO/platform/monitoring/grafana-tailnet-svc.yaml"
                 warn "helm-managed stack: use 'helm upgrade' with platform/monitoring/values.yaml" ;;
     llm)        k apply -k "$REPO/platform/nvidia-gpu-plugin/"
-                k apply -k "$REPO/openclaw/kubernetes/" ;;
-    all)        cmd_apply jellyfin; cmd_apply platform; cmd_apply monitoring; cmd_apply llm ;;
-    *) die "unknown target: $1 (jellyfin|platform|monitoring|llm|all)" ;;
+                k apply -k "$REPO/local-llm/kubernetes/" ;;
+    hermes)     k apply -k "$REPO/hermes/kubernetes/" ;;
+    all)        cmd_apply jellyfin; cmd_apply platform; cmd_apply monitoring; cmd_apply llm; cmd_apply hermes ;;
+    *) die "unknown target: $1 (jellyfin|platform|monitoring|llm|hermes|all)" ;;
   esac
 }
 cmd_serve() {  # idempotent tailnet exposure for admin UIs
@@ -324,7 +329,7 @@ Status & URLs:
   health               HTTP health check each service
 
 Deploy & serve:
-  apply [target]       kubectl apply  (jellyfin|platform|monitoring|llm|all)
+  apply [target]       kubectl apply  (jellyfin|platform|monitoring|llm|hermes|all)
   serve                (re)establish tailscale serve: Headlamp :443, Grafana :$GRAFANA_TS_PORT, Flowers Admin :8092, Traefik :8444, Open WebUI :8094, Zot :8095
   restart <svc>        rollout restart a service
   logs <svc> [-f]      tail a service's logs
@@ -333,7 +338,7 @@ Node-join & debug:
   join-cmd             print the agent-node join one-liner
   debug [svc]          diagnostics bundle (+ describe/logs for <svc>)
 
-svc = jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin | pgweb | vllm | open-webui | zot
+svc = jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin | pgweb | vllm | open-webui | zot | hermes
 Config via env: HOMELAB_DOMAIN, HOMELAB_TAILNET_HOST, KUBECONFIG, ...
 EOF
 }

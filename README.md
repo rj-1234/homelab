@@ -26,7 +26,7 @@ labels/affinity.
 | OS | Ubuntu 24.04 desktop (also a daily debugging machine — changes kept reversible) |
 | Kubernetes | k3s v1.36, `--snapshotter=native` (required on ZFS), ServiceLB/klipper + Traefik (bundled ingress) both kept |
 | Host | `cheeky` (agent), Intel i5-12600K (10c/16t), 31 GB RAM |
-| GPU | NVIDIA RTX 3080 — labeled `homelab/gpu=rtx3080`, targeted by the vLLM Deployment in `openclaw/kubernetes/`; needs host-level NVIDIA driver + `nvidia-container-toolkit` before it'll actually schedule |
+| GPU | NVIDIA RTX 3080 — labeled `homelab/gpu=rtx3080`, targeted by the vLLM Deployment in `local-llm/kubernetes/`; needs host-level NVIDIA driver + `nvidia-container-toolkit` before it'll actually schedule |
 | Disk | 478 GB NVMe (root) |
 | OS | Pop!_OS 22.04 desktop (dual-boot with Windows) |
 
@@ -68,7 +68,7 @@ flowchart TB
         subgraph monitoring [namespace: monitoring]
             graf[Grafana + Prometheus]
         end
-        subgraph openclaw [namespace: openclaw]
+        subgraph localllm [namespace: local-llm]
             owui[Open WebUI :8080]
         end
         usb[(USB NTFS media - read-only)]
@@ -76,7 +76,7 @@ flowchart TB
     end
 
     subgraph node2 [cheeky - k3s agent, labeled homelab/gpu=rtx3080]
-        vllm[vLLM :8000 - Qwen2.5-7B-Instruct-AWQ, namespace: openclaw]
+        vllm[vLLM :8000 - Qwen2.5-7B-Instruct-AWQ, namespace: local-llm]
         gpu[(NVIDIA RTX 3080)]
     end
 
@@ -144,9 +144,10 @@ files; `*.example.yaml` templates are the only committed config stand-ins.
 | **Field Vault** (doc-catalog) | `docs` | tailnet-only (`tailscale serve :8091`) | Personal document + PII vault. Postgres-only pipeline (ingest → OCR → embed → tag → PII extract), FTS + pgvector hybrid search, Gmail ingest, Presidio field extraction. SvelteKit UI, realtime via SSE. All models on-node, **no public egress**. Own docs + manifests: [doc-catalog/](doc-catalog/README.md). |
 | **Flowers** (flower-delivery) | `flowers` | `flowers.ch33ky.org` (public) | Digital flower gift app. Public compose page (pick up to 5-13 stems from 7 species, pin notes, write a message, choose how long the link stays open); `/g/:id` replays a 60s procedural-SVG bloom→wilt→petal-fall cycle while the link is alive, then permanently shows a pressed-flower keepsake. React + TS frontend, FastAPI + Postgres backend. Read-only admin list of every gift sent lives at **Flowers Admin** (same `flowers` namespace, tailnet-only `:8092`). Own code: [flower-delivery/](flower-delivery/). |
 | **qBittorrent** (arr stack) | `media` | tailnet-only (`:8080`) | Standalone torrent client behind a gluetun VPN kill-switch — manual downloads, no indexer/auto-organize automation (Radarr/Sonarr/Prowlarr were dropped as unneeded). See [arr/kubernetes/README.md](arr/kubernetes/README.md). |
-| **vLLM** | `openclaw` | cluster-internal only | Self-hosted OpenAI-compatible inference endpoint on `cheeky`'s RTX 3080, `nvidia.com/gpu: 1`. Model/quant/context-length/tool-parser are env vars (default `Qwen/Qwen2.5-7B-Instruct-AWQ`, AWQ 4-bit) so swapping models is a rollout restart, not a manifest edit. HF weights cached on a `cheeky` hostPath. Auth via `vllm-api-key` Secret. |
-| **Open WebUI** | `openclaw` | tailnet-only (`:8094`) | Chat frontend straight onto the vLLM endpoint, for model testing/debugging. |
+| **vLLM** | `local-llm` | cluster-internal only | Self-hosted OpenAI-compatible inference endpoint on `cheeky`'s RTX 3080, `nvidia.com/gpu: 1`. Model/quant/context-length/tool-parser are env vars (default `Qwen/Qwen2.5-7B-Instruct-AWQ`, AWQ 4-bit) so swapping models is a rollout restart, not a manifest edit. HF weights cached on a `cheeky` hostPath. Auth via `vllm-api-key` Secret. |
+| **Open WebUI** | `local-llm` | tailnet-only (`:8094`) | Chat frontend straight onto the vLLM endpoint, for model testing/debugging. |
 | **Zot** | `platform` | tailnet-only (`:8095`) | Self-hosted OCI registry, no auth (cluster-internal push/pull only — trust matches vLLM's). Backs custom image builds (Hermes Agent and future ones) so they don't depend on a public registry. Plain HTTP: containerd + the Docker daemon on `cheeky` both need it allowlisted as insecure. hostPath storage on `cheeky` (`/srv/zot/registry`). |
+| **Hermes Agent** | `hermes` | loopback dashboard only (`kubectl port-forward`) | Agent orchestrator on top of vLLM, WhatsApp as the primary channel — [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), MIT. Built from a pinned release tag, pushed to Zot (no upstream image published). Runs on `cheeky-mini` (no GPU needed) as two containers sharing the pod's network namespace (`gateway` — outbound-only, no inbound port; `dashboard` — loopback-bound by upstream design, holds API keys). hostPath data on `cheeky-mini` (`/srv/hermes/data`). |
 
 ---
 
@@ -162,6 +163,7 @@ platform/
   monitoring/              Grafana + Prometheus (kube-prometheus-stack Helm values)
   nvidia-gpu-plugin/       NVIDIA k8s device plugin (remote kustomize base, pinned to cheeky)
   zot/                     Self-hosted OCI registry — no public registry dependency for custom builds
+hermes/kubernetes/         Hermes Agent (on cheeky-mini) — namespace, config ConfigMap, Deployment, kustomization
 cloudflare-tunnel/
   kubernetes/              cloudflared Deployment + values.example.yaml (token via Secret)
   Readme.md                tunnel setup + dashboard routing
@@ -171,7 +173,7 @@ doc-catalog/               Personal document + field vault — own README, k8s i
 flower-delivery/           Digital flower gift app — FastAPI+Postgres in src/,
                            React+TS in web/, read-only admin dashboard in admin/
 arr/kubernetes/            qBittorrent (torrent client behind gluetun VPN) — own README
-openclaw/kubernetes/       vLLM (on cheeky) + Open WebUI — namespace, Deployments, Services, kustomization
+local-llm/kubernetes/      vLLM (on cheeky) + Open WebUI — namespace, Deployments, Services, kustomization
 bin/                       `homelab` management CLI — own README
 ```
 
@@ -214,10 +216,43 @@ vLLM + Open WebUI (needs `cheeky` GPU-wired first — NVIDIA driver +
 node-join docs and the comment in `platform/nvidia-gpu-plugin/kustomization.yaml`):
 
 ```bash
-kubectl apply -f openclaw/kubernetes/00-namespace.yaml
-sudo mkdir -p /srv/openclaw/{vllm-cache,open-webui-data}
-kubectl -n openclaw create secret generic vllm-api-key --from-literal=key="$(openssl rand -hex 32)"
+kubectl apply -f local-llm/kubernetes/00-namespace.yaml
+sudo mkdir -p /srv/openclaw/{vllm-cache,open-webui-data}   # hostPath names kept as-is, predate the local-llm rename
+kubectl -n local-llm create secret generic vllm-api-key --from-literal=key="$(openssl rand -hex 32)"
 homelab apply llm
+```
+
+Hermes Agent (needs Zot above, and `cheeky-mini`'s containerd trusting it as an
+insecure registry — same shape as `cheeky`'s, see the Zot row's config
+comment). Build+push the image from a pinned release tag first (`cheeky`,
+where Docker + Zot both live — no upstream image published, and no
+Dockerfile is vendored into this repo, it's built straight from their
+source):
+
+```bash
+# on cheeky
+git clone --depth 1 --branch v2026.8.3 https://github.com/NousResearch/hermes-agent.git /tmp/hermes-agent
+cd /tmp/hermes-agent
+docker build -t 10.43.200.51:5000/hermes-agent:v2026.8.3 .
+docker push 10.43.200.51:5000/hermes-agent:v2026.8.3
+docker run --rm 10.43.200.51:5000/hermes-agent:v2026.8.3 id hermes   # confirm the UID/GID hermes/kubernetes/10-hermes.yaml assumes (10000:10000)
+
+# on cheeky-mini, containerd trust for Zot (mirrors cheeky's Docker daemon config)
+sudo mkdir -p /etc/rancher/k3s
+printf 'mirrors:\n  "10.43.200.51:5000":\n    endpoint:\n      - "http://10.43.200.51:5000"\n' | sudo tee /etc/rancher/k3s/registries.yaml
+sudo systemctl restart k3s
+
+# then deploy — namespace first so the secret below has somewhere to go
+sudo mkdir -p /srv/hermes/data && sudo chown 10000:10000 /srv/hermes/data   # on cheeky-mini
+kubectl apply -f hermes/kubernetes/00-namespace.yaml
+kubectl -n hermes create secret generic vllm-api-key \
+  --from-literal=key="$(kubectl -n local-llm get secret vllm-api-key -o jsonpath='{.data.key}' | base64 -d)"
+homelab apply hermes
+```
+
+WhatsApp pairing (one-time, scan the printed QR):
+```bash
+kubectl -n hermes exec -it deploy/hermes -c gateway -- hermes whatsapp
 ```
 
 Then: Tailscale ([tailscale/README.md](tailscale/README.md)) for private access +
@@ -265,6 +300,13 @@ curl -sfL https://get.k3s.io | K3S_URL=https://192.168.12.21:6443 \
   `nvidia.com/gpu: 1` allocatable, vLLM serving from it.
 - OpenClaw was tried here and removed — broken Control UI chat (unfixed
   upstream CSP bug) and a rigid config schema that fought back at every
-  step. Next agent-orchestration attempt: Hermes Agent
-  (https://github.com/NousResearch/hermes-agent), staged behind a
-  self-hosted Zot registry so custom builds don't depend on a public one.
+  step. Replaced with Hermes Agent
+  (https://github.com/NousResearch/hermes-agent), built from a pinned
+  release tag and pushed to the self-hosted Zot registry.
+- vLLM's context window: tried extending past Qwen2.5-7B-Instruct's native
+  32768 (fp8 KV-cache + static YaRN RoPE scaling to 65536) — booted clean,
+  no OOM, but real prompts degenerated into repetition-loop garbage.
+  Reverted to 32768. Worth another attempt later, isolating fp8 KV-cache
+  from YaRN and testing with real conversations, not just a healthy
+  startup log — or swapping in a model actually trained for a longer
+  window instead of RoPE-extrapolating this one.
