@@ -15,12 +15,14 @@ data:
       provider: custom
       base_url: "http://vllm.local-llm.svc.cluster.local:8000/v1"
       api_key: "${VLLM_API_KEY}"   # from the gateway container's env, see 10-hermes.yaml
-      default: "qwen2.5-7b-instruct-awq"
-      # local-llm's vLLM currently caps at 32768 (native Qwen2.5-7B window
-      # — a YaRN context-extension attempt broke output quality and was
-      # reverted, see the plan). Keep this in sync with vLLM's
-      # MAX_MODEL_LEN; raise it if that ceiling ever moves for real.
-      context_length: 32768
+      default: "llama-3.2-3b-instruct-awq"
+      # local-llm's vLLM serves Llama-3.2-3B-Instruct-AWQ at 65536 —
+      # genuinely native long context (no RoPE scaling hack) + fp8
+      # KV-cache to fit the 10GB card, clears Hermes's 64K floor with
+      # margin. See local-llm/kubernetes/10-vllm.yaml for the full model
+      # history (Qwen2.5-7B → YaRN attempt → Gemma 4 E4B → Llama-3.1-8B →
+      # this). Keep in sync with vLLM's MAX_MODEL_LEN.
+      context_length: 65536
     context_compression:
       enabled: true
       threshold: 0.85
