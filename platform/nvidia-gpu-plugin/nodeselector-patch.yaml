@@ -1,0 +1,15 @@
+---
+# Pin to cheeky only — the static upstream DaemonSet targets every node, but
+# this cluster has exactly one GPU (cheeky's RTX 3080, homelab/gpu=rtx3080),
+# so there's no reason for the plugin pod to schedule (and crashloop) on
+# cheeky-mini or any other node.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin-daemonset
+  namespace: kube-system
+spec:
+  template:
+    spec:
+      nodeSelector:
+        homelab/gpu: rtx3080

@@ -1,0 +1,82 @@
+---
+# Self-hosted OCI registry (https://zotregistry.dev) — lets us build+push
+# images ourselves (Hermes Agent and future custom builds) instead of
+# depending on a public registry. Plain HTTP, no auth: cluster-internal
+# ClusterIP only, no tailnet/public exposure — same trust level already
+# given to vLLM's endpoint. containerd on any node that pulls from it, and
+# the Docker daemon on `cheeky` (where builds/pushes happen), both need this
+# registry allowlisted as insecure/plain-HTTP — see README for the exact
+# steps, that's host config outside this manifest's reach.
+#
+# Host prep on cheeky before first apply:
+#   sudo mkdir -p /srv/zot/registry
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zot
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: zot
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zot
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zot
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: cheeky
+      containers:
+        - name: zot
+          image: ghcr.io/project-zot/zot:v2.1.15
+          ports:
+            - name: http
+              containerPort: 5000
+          readinessProbe:
+            httpGet:
+              path: /v2/
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/zot
+              readOnly: true
+            - name: storage
+              mountPath: /var/lib/registry
+      volumes:
+        - name: config
+          configMap:
+            name: zot-config
+        - name: storage
+          hostPath:
+            path: /srv/zot/registry
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zot
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: zot
+spec:
+  type: ClusterIP
+  # Reusing the ClusterIP OpenClaw's Service used to hold, now free.
+  clusterIP: 10.43.200.51
+  selector:
+    app.kubernetes.io/name: zot
+  ports:
+    - name: http
+      port: 5000
+      targetPort: http

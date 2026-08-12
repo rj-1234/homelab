@@ -4,8 +4,10 @@ Bare-metal k3s deployment of Jellyfin for the `cheeky-mini` homelab node.
 Single node today, built to stay put when agent nodes join later.
 
 ## What this assumes about the host
-- **k3s** installed with `--snapshotter=native` (required on the ZFS root) and
-  `--disable traefik`; ServiceLB/klipper left enabled.
+- **k3s** installed with `--snapshotter=native` (required on the ZFS root);
+  ServiceLB/klipper and Traefik (bundled ingress, see `platform/traefik/`)
+  both left enabled. Jellyfin itself still uses its own `LoadBalancer`
+  Service directly, not routed through Traefik.
 - The **Seagate USB media store** mounted at `/media/cheeky/seagate_hdd` with
   `Movies/` and `TvShows/` (already in `/etc/fstab`, `uid=1000,gid=1000,nofail`).
 - Intel iGPU at `/dev/dri` (`renderD128` = `render` gid **992**, `card1` =

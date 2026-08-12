@@ -1,0 +1,98 @@
+---
+# Self-hosted OpenAI-compatible inference endpoint for OpenClaw + Open WebUI.
+# Model/quant/context/tool-parser are env vars, not baked into the command,
+# so swapping models is `kubectl set env` + `kubectl rollout restart`, not a
+# manifest edit. TOOL_CALL_PARSER must match the model family (hermes for
+# Qwen2/2.5/Hermes, llama3_json for Llama 3.x, mistral for Mistral) — see
+# https://docs.vllm.ai/en/latest/features/tool_calling.html
+#
+# Host prep on cheeky before first apply:
+#   sudo mkdir -p /srv/openclaw/vllm-cache
+#   kubectl -n openclaw create secret generic vllm-api-key \
+#     --from-literal=key="$(openssl rand -hex 32)"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: openclaw
+  labels: { app.kubernetes.io/name: vllm }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app.kubernetes.io/name: vllm } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: vllm } }
+    spec:
+      nodeSelector: { kubernetes.io/hostname: cheeky }
+      # k8s auto-injects Docker-links env vars for every Service in this
+      # namespace (VLLM_PORT, VLLM_SERVICE_HOST, ...) — collides with vLLM's
+      # own VLLM_PORT env var and crashes EngineCore on startup. Disable.
+      enableServiceLinks: false
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - >-
+              vllm serve "$MODEL_ID"
+              --quantization "$QUANTIZATION"
+              --max-model-len "$MAX_MODEL_LEN"
+              --enable-auto-tool-choice
+              --tool-call-parser "$TOOL_CALL_PARSER"
+              --gpu-memory-utilization "$GPU_MEM_UTIL"
+              --enforce-eager
+              --served-model-name "$SERVED_MODEL_NAME"
+              --api-key "$VLLM_API_KEY"
+              --port 8000
+          env:
+            - { name: MODEL_ID, value: "Qwen/Qwen2.5-7B-Instruct-AWQ" }
+            # Slash-free alias for the API-facing `model` field — OpenClaw's
+            # config parses model refs as "provider/model", and the raw
+            # MODEL_ID (itself containing a "/") collides with that.
+            - { name: SERVED_MODEL_NAME, value: "qwen2.5-7b-instruct-awq" }
+            - { name: QUANTIZATION, value: "awq" }
+            # RTX 3080 only exposes ~9.64GiB usable (desktop GPU, not
+            # headless) — 0.90 + CUDA graph capture OOM'd at startup.
+            # 0.80 leaves headroom; --enforce-eager (above) drops graph
+            # capture's extra buffer pool entirely, the actual alloc that
+            # failed. Raise this if the model changes and fits with room to
+            # spare.
+            - { name: GPU_MEM_UTIL, value: "0.80" }
+            # OpenClaw hard-refuses any model with contextWindow < 16000
+            # ("FailoverError: Model context window too small"), and warns
+            # below 32000. 16384 technically cleared the hard floor but the
+            # system prompt + full tool-schema set alone already eats ~7-8k
+            # tokens before any conversation — real requests overflowed and
+            # died as a raw connection failure. Must stay in sync with
+            # `contextWindow` in the pre-seeded openclaw.json provider block.
+            - { name: MAX_MODEL_LEN, value: "32768" }
+            - { name: TOOL_CALL_PARSER, value: "hermes" }
+            - { name: HF_HOME, value: /root/.cache/huggingface }
+            - name: VLLM_API_KEY
+              valueFrom: { secretKeyRef: { name: vllm-api-key, key: key } }
+          ports: [{ name: http, containerPort: 8000 }]
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 80   # first run downloads + quantizes weights
+          resources:
+            requests: { cpu: "2" }
+            limits: { nvidia.com/gpu: "1" }
+          volumeMounts:
+            - { name: hf-cache, mountPath: /root/.cache/huggingface }
+      volumes:
+        - name: hf-cache
+          hostPath: { path: /srv/openclaw/vllm-cache, type: Directory }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  namespace: openclaw
+  labels: { app.kubernetes.io/name: vllm }
+spec:
+  type: ClusterIP
+  clusterIP: 10.43.200.50
+  selector: { app.kubernetes.io/name: vllm }
+  ports: [{ name: http, port: 8000, targetPort: http }]

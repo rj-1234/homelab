@@ -17,29 +17,46 @@ data:
     iconStyle: theme
     hideVersion: true
     useEqualHeights: true
+    background:
+      image: /images/background.jpg
+      blur: md
+      brightness: 50
+      opacity: 60
     # 2 columns keeps tiles large and readable; Homepage stacks them to a single
     # column on narrow (mobile) viewports automatically.
     layout:
       Media:
+        tab: Services
         icon: mdi-play-circle-outline
         style: row
         columns: 2
+      Gifts:
+        tab: Services
+        icon: mdi-flower-tulip-outline
+        style: row
+        columns: 2
       Downloads:
+        tab: Infrastructure
         icon: mdi-download-circle-outline
         style: row
         columns: 1
       Documents:
+        tab: Infrastructure
         icon: mdi-file-document-multiple-outline
         style: row
         columns: 1
       Infrastructure:
+        tab: Infrastructure
         icon: mdi-server
         style: row
         columns: 2
-      Gifts:
-        icon: mdi-flower-tulip-outline
+      AI:
+        tab: Infrastructure
+        icon: mdi-robot-outline
         style: row
         columns: 2
+      Homelab:
+        tab: Links
 
   services.yaml: |
     - Media:
@@ -47,69 +64,95 @@ data:
             href: https://jellyfin.ch33ky.org
             description: Movies & TV
             icon: jellyfin.png
-            siteMonitor: http://jellyfin.media.svc.cluster.local:8096
-            statusStyle: dot
+            namespace: media
+            app: jellyfin
+            widget:
+              type: jellyfin
+              url: http://jellyfin.media.svc.cluster.local:8096
+              key: "{{HOMEPAGE_VAR_JELLYFIN_KEY}}"
+              enableNowPlaying: true
     - Downloads:
         - qBittorrent:
             href: https://cheeky-mini.tail2f4253.ts.net:8080
             description: Torrent client · no VPN
             icon: qbittorrent.png
-            siteMonitor: http://10.43.200.23:8080
-            statusStyle: dot
+            namespace: media
+            app: qbittorrent
+            widget:
+              type: qbittorrent
+              url: http://10.43.200.23:8080
+              username: admin
+              password: "{{HOMEPAGE_VAR_QBIT_PW}}"
     - Documents:
         - Field Vault:
             href: https://cheeky-mini.tail2f4253.ts.net:8091
             description: Vault · library · semantic search
             icon: mdi-shield-key-outline
-            siteMonitor: http://10.43.200.33:8080
-            statusStyle: dot
+            namespace: docs
+            app: api
     - Infrastructure:
         - Headlamp:
             href: https://cheeky-mini.tail2f4253.ts.net
             description: Kubernetes dashboard · tailnet-only
             icon: headlamp.png
-            siteMonitor: http://headlamp.platform.svc.cluster.local
-            statusStyle: dot
+            namespace: platform
+            app: headlamp
         - Grafana:
             href: https://cheeky-mini.tail2f4253.ts.net:8443
             description: Metrics & dashboards · tailnet-only
             icon: grafana.png
-            siteMonitor: http://10.43.200.10:80
-            statusStyle: dot
+            namespace: monitoring
+            app: grafana
+        - Traefik:
+            href: https://cheeky-mini.tail2f4253.ts.net:8444/dashboard/
+            description: Ingress controller · tailnet-only
+            icon: traefik.png
+            namespace: kube-system
+            app: traefik
+            widget:
+              type: traefik
+              url: http://10.43.200.40:8080
         - pgweb:
             href: https://cheeky-mini.tail2f4253.ts.net:8081
             description: Docs + Flowers DB · tables, rows, read-only SQL
             icon: mdi-database-search-outline
-            siteMonitor: http://pgweb.platform.svc.cluster.local:8081
-            statusStyle: dot
+            namespace: platform
+            app: pgweb
         - Cloudflare Tunnel:
             href: https://one.dash.cloudflare.com
             description: Public ingress · ch33ky.org
             icon: cloudflare-zero-trust.png
+        - Zot Registry:
+            href: https://cheeky-mini.tail2f4253.ts.net:8095
+            description: Self-hosted OCI registry · tailnet-only
+            icon: mdi-package-variant-closed
+            namespace: platform
+            app: zot
+    - AI:
+        - Open WebUI:
+            href: https://cheeky-mini.tail2f4253.ts.net:8094
+            description: Chat UI onto vLLM (Qwen2.5-7B) · tailnet-only
+            icon: mdi-chat-processing-outline
+            namespace: openclaw
+            app: open-webui
     - Gifts:
         - Flowers:
             href: https://flowers.ch33ky.org
             description: Digital flower delivery · tie a bouquet, choose how long it lasts
             icon: mdi-flower-tulip-outline
-            siteMonitor: http://public-web.flowers.svc.cluster.local:8080
-            statusStyle: dot
+            namespace: flowers
+            app: public-web
         - Flowers Admin:
             href: https://cheeky-mini.tail2f4253.ts.net:8092
             description: Sent bouquets · tailnet-only
             icon: mdi-flower-outline
-            siteMonitor: http://admin-web.flowers.svc.cluster.local:8080
-            statusStyle: dot
+            namespace: flowers
+            app: admin-web
 
   widgets.yaml: |
-    - greeting:
-        text_size: 4xl
-        text: cheeky-mini homelab
-    - datetime:
-        text_size: xl
-        format:
-          dateStyle: full
-          timeStyle: short
-          hourCycle: h23
+    - search:
+        provider: duckduckgo
+        target: _blank
     - kubernetes:
         cluster:
           show: true
@@ -119,14 +162,18 @@ data:
           label: cluster
         nodes:
           show: false
-    - resources:
-        label: node
-        cpu: true
-        memory: true
-        uptime: true
-    - search:
-        provider: duckduckgo
-        target: _blank
+    - openmeteo:
+        label: Philadelphia
+        latitude: 39.9526
+        longitude: -75.1652
+        timezone: America/New_York
+        units: imperial
+    - datetime:
+        text_size: xl
+        format:
+          dateStyle: short
+          timeStyle: short
+          hourCycle: h23
 
   bookmarks.yaml: |
     - Homelab:

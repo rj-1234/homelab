@@ -14,6 +14,9 @@ GRAFANA_TS_PORT="${HOMELAB_GRAFANA_TS_PORT:-8443}"
 HEADLAMP_IP="${HOMELAB_HEADLAMP_IP:-10.43.142.241}"   # pinned ClusterIP
 GRAFANA_IP="${HOMELAB_GRAFANA_IP:-10.43.200.10}"       # pinned ClusterIP
 ADMIN_IP="${HOMELAB_ADMIN_IP:-10.43.13.38}"            # pinned ClusterIP (Flowers Admin)
+TRAEFIK_IP="${HOMELAB_TRAEFIK_IP:-10.43.200.40}"       # pinned ClusterIP (dashboard/API, port 8080)
+OPENWEBUI_IP="${HOMELAB_OPENWEBUI_IP:-10.43.200.52}"   # pinned ClusterIP (Open WebUI, port 8080)
+ZOT_IP="${HOMELAB_ZOT_IP:-10.43.200.51}"               # pinned ClusterIP (self-hosted registry, port 5000)
 # repo root = parent of this script's dir
 REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 
@@ -36,6 +39,9 @@ svc_map() {
     prometheus) echo "monitoring prometheus-monitoring-kube-prometheus-prometheus" ;;
     admin)      echo "flowers admin-web" ;;
     pgweb)      echo "platform pgweb" ;;
+    vllm)       echo "openclaw vllm" ;;
+    open-webui) echo "openclaw open-webui" ;;
+    zot)        echo "platform zot" ;;
     *) return 1 ;;
   esac
 }
@@ -192,6 +198,9 @@ Private (Tailscale):
   Flowers Admin https://$TAILNET_HOST:8092
   qBittorrent   https://$TAILNET_HOST:8080
   pgweb         https://$TAILNET_HOST:8081
+  Traefik       https://$TAILNET_HOST:8444/dashboard/
+  Open WebUI    https://$TAILNET_HOST:8094
+  Zot registry  https://$TAILNET_HOST:8095
 
 LAN:
   Jellyfin      http://$(server_ip):8096
@@ -205,6 +214,10 @@ cmd_health() {
     [homepage]="http://homepage.platform.svc.cluster.local:3000/"
     [headlamp]="http://$HEADLAMP_IP:80/"
     [grafana]="http://$GRAFANA_IP:80/api/health"
+    [traefik]="http://$TRAEFIK_IP:8080/ping"
+    [vllm]="http://vllm.openclaw.svc.cluster.local:8000/health"
+    [open-webui]="http://$OPENWEBUI_IP:8080/health"
+    [zot]="http://$ZOT_IP:5000/v2/"
   )
   for name in "${!t[@]}"; do
     code=$(k -n platform run hl-health-$$-"$name" --rm -i --restart=Never -q \
@@ -221,11 +234,15 @@ cmd_apply() {
     jellyfin)   k apply -k "$REPO/jellyfin/kubernetes/" ;;
     platform)   k apply -f "$REPO/platform/00-namespace.yaml"
                 k apply -f "$REPO/platform/headlamp/" -f "$REPO/platform/homepage/"
-                k apply -f "$REPO/cloudflare-tunnel/kubernetes/cloudflared-deployment.yaml" ;;
+                k apply -f "$REPO/cloudflare-tunnel/kubernetes/cloudflared-deployment.yaml"
+                k apply -f "$REPO/platform/traefik/"
+                k apply -f "$REPO/platform/zot/" ;;
     monitoring) k apply -f "$REPO/platform/monitoring/grafana-tailnet-svc.yaml"
                 warn "helm-managed stack: use 'helm upgrade' with platform/monitoring/values.yaml" ;;
-    all)        cmd_apply jellyfin; cmd_apply platform; cmd_apply monitoring ;;
-    *) die "unknown target: $1 (jellyfin|platform|monitoring|all)" ;;
+    llm)        k apply -k "$REPO/platform/nvidia-gpu-plugin/"
+                k apply -k "$REPO/openclaw/kubernetes/" ;;
+    all)        cmd_apply jellyfin; cmd_apply platform; cmd_apply monitoring; cmd_apply llm ;;
+    *) die "unknown target: $1 (jellyfin|platform|monitoring|llm|all)" ;;
   esac
 }
 cmd_serve() {  # idempotent tailnet exposure for admin UIs
@@ -233,7 +250,10 @@ cmd_serve() {  # idempotent tailnet exposure for admin UIs
   sudo tailscale serve --bg --https=443  "http://$HEADLAMP_IP:80"
   sudo tailscale serve --bg --https="$GRAFANA_TS_PORT" "http://$GRAFANA_IP:80"
   sudo tailscale serve --bg --https=8092 "http://$ADMIN_IP:8080"
-  info "serving Headlamp :443 + Grafana :$GRAFANA_TS_PORT + Flowers Admin :8092 on $TAILNET_HOST"
+  sudo tailscale serve --bg --https=8444 "http://$TRAEFIK_IP:8080"
+  sudo tailscale serve --bg --https=8094 "http://$OPENWEBUI_IP:8080"
+  sudo tailscale serve --bg --https=8095 "http://$ZOT_IP:5000"
+  info "serving Headlamp :443 + Grafana :$GRAFANA_TS_PORT + Flowers Admin :8092 + Traefik :8444 + Open WebUI :8094 + Zot :8095 on $TAILNET_HOST"
   sudo tailscale serve status
 }
 cmd_restart() {
@@ -304,8 +324,8 @@ Status & URLs:
   health               HTTP health check each service
 
 Deploy & serve:
-  apply [target]       kubectl apply  (jellyfin|platform|monitoring|all)
-  serve                (re)establish tailscale serve: Headlamp :443, Grafana :$GRAFANA_TS_PORT, Flowers Admin :8092
+  apply [target]       kubectl apply  (jellyfin|platform|monitoring|llm|all)
+  serve                (re)establish tailscale serve: Headlamp :443, Grafana :$GRAFANA_TS_PORT, Flowers Admin :8092, Traefik :8444, Open WebUI :8094, Zot :8095
   restart <svc>        rollout restart a service
   logs <svc> [-f]      tail a service's logs
 
@@ -313,7 +333,7 @@ Node-join & debug:
   join-cmd             print the agent-node join one-liner
   debug [svc]          diagnostics bundle (+ describe/logs for <svc>)
 
-svc = jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin | pgweb
+svc = jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin | pgweb | vllm | open-webui | zot
 Config via env: HOMELAB_DOMAIN, HOMELAB_TAILNET_HOST, KUBECONFIG, ...
 EOF
 }

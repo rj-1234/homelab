@@ -1,0 +1,26 @@
+# Stable-IP Service so tailscale serve's target survives Traefik pod
+# restarts (the helm-managed `traefik` Service in kube-system only carries
+# ports 80/443, not the dashboard/API port). Port 8080 = the `traefik` named
+# container port (verified live: --entryPoints.traefik.address=:8080/tcp).
+# Reached only over the tailnet. Keep the tailscale serve target bare (no
+# path) — with mount "/" (default), tailscale serve prepends the client's
+# request path onto the target path, so a target ending in /dashboard/
+# doubles up to /dashboard/dashboard/ and 404s inside Traefik's dashboard app.
+# sudo tailscale serve --bg --https=8444 http://10.43.200.40:8080
+# -> https://cheeky-mini.tail2f4253.ts.net:8444/dashboard/
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik-dashboard
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: traefik-dashboard
+spec:
+  type: ClusterIP
+  clusterIP: 10.43.200.40
+  selector:
+    app.kubernetes.io/name: traefik
+  ports:
+    - name: dashboard
+      port: 8080
+      targetPort: 8080

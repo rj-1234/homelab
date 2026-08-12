@@ -41,9 +41,24 @@ spec:
             # `kubectl port-forward` testing. Comma-separated.
             - name: HOMEPAGE_ALLOWED_HOSTS
               value: "localhost:3000,localhost:8081,home.ch33ky.org,cheeky-mini"
+          # Widget credentials (Jellyfin API key, qBittorrent password) referenced
+          # in configmap.yaml as {{HOMEPAGE_VAR_*}} — Homepage substitutes any env
+          # var prefixed HOMEPAGE_VAR_ into its config at render time, so the
+          # Secret's own keys must be named HOMEPAGE_VAR_* (envFrom passes keys
+          # through unprefixed). Set via:
+          #   kubectl -n platform create secret generic homepage-secrets \
+          #     --from-literal=HOMEPAGE_VAR_JELLYFIN_KEY=... \
+          #     --from-literal=HOMEPAGE_VAR_QBIT_PW=... \
+          #     --dry-run=client -o yaml | kubectl apply -f -
+          envFrom:
+            - secretRef:
+                name: homepage-secrets
           volumeMounts:
             - name: config
               mountPath: /app/config
+            - name: background
+              mountPath: /app/public/images
+              readOnly: true
           livenessProbe:
             httpGet:
               path: /
@@ -74,6 +89,13 @@ spec:
         - name: config-src
           configMap:
             name: homepage-config
+        # Background wallpaper — read-only host dir, same pattern as Jellyfin's
+        # media mounts. Drop the image at /srv/homepage/images/background.jpg
+        # on cheeky-mini (referenced in settings.yaml as /images/background.jpg).
+        - name: background
+          hostPath:
+            path: /srv/homepage/images
+            type: Directory
 ---
 apiVersion: v1
 kind: Service
