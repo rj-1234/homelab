@@ -25,6 +25,8 @@
 #   sudo chown 10000:10000 /srv/hermes/data
 #   kubectl -n hermes create secret generic vllm-api-key \
 #     --from-literal=key="$(kubectl -n local-llm get secret vllm-api-key -o jsonpath='{.data.key}' | base64 -d)"
+#   kubectl -n hermes create secret generic hermes-dashboard-auth \
+#     --from-literal=password_hash='<output of hash_password(), see README>'
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -71,6 +73,8 @@ spec:
           env:
             - { name: HERMES_UID, value: "10000" }
             - { name: HERMES_GID, value: "10000" }
+            - name: DASHBOARD_PW_HASH
+              valueFrom: { secretKeyRef: { name: hermes-dashboard-auth, key: password_hash } }
           ports: [{ name: dashboard, containerPort: 9119 }]
           volumeMounts:
             - { name: data, mountPath: /opt/data }

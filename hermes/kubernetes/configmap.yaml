@@ -24,3 +24,12 @@ data:
     context_compression:
       enabled: true
       threshold: 0.85
+    dashboard:
+      # Hermes refuses to bind the dashboard to anything but 127.0.0.1
+      # without an auth provider configured — required to expose it over
+      # the tailnet (see 10-hermes.yaml). Hash generated once via the
+      # image's own `hash_password()` helper, stored in the
+      # hermes-dashboard-auth Secret, not committed here.
+      basic_auth:
+        username: "admin"
+        password_hash: "${DASHBOARD_PW_HASH}"
