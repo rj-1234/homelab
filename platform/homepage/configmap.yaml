@@ -50,6 +50,11 @@ data:
         icon: mdi-server
         style: row
         columns: 2
+      AI:
+        tab: Infrastructure
+        icon: mdi-robot-outline
+        style: row
+        columns: 2
       Homelab:
         tab: Links
 
@@ -117,6 +122,19 @@ data:
             href: https://one.dash.cloudflare.com
             description: Public ingress · ch33ky.org
             icon: cloudflare-zero-trust.png
+        - Zot Registry:
+            href: https://cheeky-mini.tail2f4253.ts.net:8095
+            description: Self-hosted OCI registry · tailnet-only
+            icon: mdi-package-variant-closed
+            namespace: platform
+            app: zot
+    - AI:
+        - Open WebUI:
+            href: https://cheeky-mini.tail2f4253.ts.net:8094
+            description: Chat UI onto vLLM (Qwen2.5-7B) · tailnet-only
+            icon: mdi-chat-processing-outline
+            namespace: openclaw
+            app: open-webui
     - Gifts:
         - Flowers:
             href: https://flowers.ch33ky.org

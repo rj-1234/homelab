@@ -4,5 +4,4 @@ kind: Kustomization
 resources:
   - 00-namespace.yaml
   - 10-vllm.yaml
-  - 20-openclaw.yaml
   - 30-open-webui.yaml

@@ -24,6 +24,10 @@ spec:
     metadata: { labels: { app.kubernetes.io/name: vllm } }
     spec:
       nodeSelector: { kubernetes.io/hostname: cheeky }
+      # k8s auto-injects Docker-links env vars for every Service in this
+      # namespace (VLLM_PORT, VLLM_SERVICE_HOST, ...) — collides with vLLM's
+      # own VLLM_PORT env var and crashes EngineCore on startup. Disable.
+      enableServiceLinks: false
       containers:
         - name: vllm
           image: vllm/vllm-openai:latest
@@ -35,13 +39,33 @@ spec:
               --max-model-len "$MAX_MODEL_LEN"
               --enable-auto-tool-choice
               --tool-call-parser "$TOOL_CALL_PARSER"
-              --gpu-memory-utilization 0.90
+              --gpu-memory-utilization "$GPU_MEM_UTIL"
+              --enforce-eager
+              --served-model-name "$SERVED_MODEL_NAME"
               --api-key "$VLLM_API_KEY"
               --port 8000
           env:
             - { name: MODEL_ID, value: "Qwen/Qwen2.5-7B-Instruct-AWQ" }
+            # Slash-free alias for the API-facing `model` field — OpenClaw's
+            # config parses model refs as "provider/model", and the raw
+            # MODEL_ID (itself containing a "/") collides with that.
+            - { name: SERVED_MODEL_NAME, value: "qwen2.5-7b-instruct-awq" }
             - { name: QUANTIZATION, value: "awq" }
-            - { name: MAX_MODEL_LEN, value: "8192" }
+            # RTX 3080 only exposes ~9.64GiB usable (desktop GPU, not
+            # headless) — 0.90 + CUDA graph capture OOM'd at startup.
+            # 0.80 leaves headroom; --enforce-eager (above) drops graph
+            # capture's extra buffer pool entirely, the actual alloc that
+            # failed. Raise this if the model changes and fits with room to
+            # spare.
+            - { name: GPU_MEM_UTIL, value: "0.80" }
+            # OpenClaw hard-refuses any model with contextWindow < 16000
+            # ("FailoverError: Model context window too small"), and warns
+            # below 32000. 16384 technically cleared the hard floor but the
+            # system prompt + full tool-schema set alone already eats ~7-8k
+            # tokens before any conversation — real requests overflowed and
+            # died as a raw connection failure. Must stay in sync with
+            # `contextWindow` in the pre-seeded openclaw.json provider block.
+            - { name: MAX_MODEL_LEN, value: "32768" }
             - { name: TOOL_CALL_PARSER, value: "hermes" }
             - { name: HF_HOME, value: /root/.cache/huggingface }
             - name: VLLM_API_KEY
