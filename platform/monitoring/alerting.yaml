@@ -47,6 +47,9 @@ data:
             data:
               - refId: A
                 datasourceUid: prometheus
+                relativeTimeRange:
+                  from: 600
+                  to: 0
                 model:
                   refId: A
                   datasource: { type: prometheus, uid: prometheus }
@@ -69,6 +72,9 @@ data:
             data:
               - refId: A
                 datasourceUid: prometheus
+                relativeTimeRange:
+                  from: 600
+                  to: 0
                 model:
                   refId: A
                   datasource: { type: prometheus, uid: prometheus }
@@ -91,6 +97,9 @@ data:
             data:
               - refId: A
                 datasourceUid: prometheus
+                relativeTimeRange:
+                  from: 600
+                  to: 0
                 model:
                   refId: A
                   datasource: { type: prometheus, uid: prometheus }
@@ -113,6 +122,9 @@ data:
             data:
               - refId: A
                 datasourceUid: prometheus
+                relativeTimeRange:
+                  from: 600
+                  to: 0
                 model:
                   refId: A
                   datasource: { type: prometheus, uid: prometheus }
@@ -135,6 +147,9 @@ data:
             data:
               - refId: A
                 datasourceUid: prometheus
+                relativeTimeRange:
+                  from: 600
+                  to: 0
                 model:
                   refId: A
                   datasource: { type: prometheus, uid: prometheus }

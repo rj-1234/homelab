@@ -149,6 +149,13 @@ data:
             icon: grafana.png
             namespace: monitoring
             app: grafana
+            widget:
+              type: grafana
+              version: 2
+              alerts: grafana
+              url: http://monitoring-grafana.monitoring.svc.cluster.local:80
+              username: "{{HOMEPAGE_VAR_GRAFANA_USER}}"
+              password: "{{HOMEPAGE_VAR_GRAFANA_PW}}"
         - Traefik:
             href: https://cheeky-mini.tail2f4253.ts.net:8444/dashboard/
             description: Ingress controller · tailnet-only
