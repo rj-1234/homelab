@@ -98,18 +98,32 @@ data:
             icon: prowlarr.png
             namespace: media
             app: prowlarr
+            widget:
+              type: prowlarr
+              url: http://prowlarr.media.svc.cluster.local:9696
+              key: "{{HOMEPAGE_VAR_PROWLARR_KEY}}"
         - Radarr:
             href: https://cheeky-mini.tail2f4253.ts.net:7878
             description: Movies · auto-fetch & organize · tailnet-only
             icon: radarr.png
             namespace: media
             app: radarr
+            widget:
+              type: radarr
+              url: http://radarr.media.svc.cluster.local:7878
+              key: "{{HOMEPAGE_VAR_RADARR_KEY}}"
+              enableQueue: true
         - Sonarr:
             href: https://cheeky-mini.tail2f4253.ts.net:8989
             description: TV · auto-fetch & organize · tailnet-only
             icon: sonarr.png
             namespace: media
             app: sonarr
+            widget:
+              type: sonarr
+              url: http://sonarr.media.svc.cluster.local:8989
+              key: "{{HOMEPAGE_VAR_SONARR_KEY}}"
+              enableQueue: true
         - Field Vault:
             href: https://cheeky-mini.tail2f4253.ts.net:8091
             description: Vault · library · semantic search
