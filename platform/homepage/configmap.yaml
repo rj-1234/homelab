@@ -12,9 +12,9 @@ data:
     title: cheeky-mini
     theme: dark
     color: slate
-    headerStyle: boxedWidgets
+    headerStyle: clean
     target: _blank
-    iconStyle: theme
+    iconStyle: gradient
     hideVersion: true
     useEqualHeights: true
     background:
@@ -22,44 +22,32 @@ data:
       blur: md
       brightness: 50
       opacity: 60
-    # 2 columns keeps tiles large and readable; Homepage stacks them to a single
-    # column on narrow (mobile) viewports automatically.
+    # 4 columns, single row per tab; Homepage stacks them to a single column
+    # on narrow (mobile) viewports automatically.
     layout:
-      Media:
-        tab: Services
-        icon: mdi-play-circle-outline
+      Public:
+        tab: Public
+        icon: mdi-earth
         style: row
-        columns: 2
-      Gifts:
-        tab: Services
-        icon: mdi-flower-tulip-outline
+        columns: 4
+      Private:
+        tab: Private
+        icon: mdi-lock-outline
         style: row
-        columns: 2
-      Downloads:
-        tab: Infrastructure
-        icon: mdi-download-circle-outline
-        style: row
-        columns: 1
-      Documents:
-        tab: Infrastructure
-        icon: mdi-file-document-multiple-outline
-        style: row
-        columns: 1
-      Infrastructure:
-        tab: Infrastructure
+        columns: 4
+      Infra:
+        tab: Infra
         icon: mdi-server
         style: row
-        columns: 2
-      AI:
-        tab: Infrastructure
+        columns: 4
+      Platform:
+        tab: Platform
         icon: mdi-robot-outline
         style: row
-        columns: 2
-      Homelab:
-        tab: Links
+        columns: 4
 
   services.yaml: |
-    - Media:
+    - Public:
         - Jellyfin:
             href: https://jellyfin.ch33ky.org
             description: Movies & TV
@@ -71,26 +59,52 @@ data:
               url: http://jellyfin.media.svc.cluster.local:8096
               key: "{{HOMEPAGE_VAR_JELLYFIN_KEY}}"
               enableNowPlaying: true
-    - Downloads:
+              enableUser: true
+              enableMediaControl: true
+              showEpisodeNumber: true
+              expandOneStreamToTwoRows: true
+        - Flowers:
+            href: https://flowers.ch33ky.org
+            description: Digital flower delivery · tie a bouquet, choose how long it lasts
+            icon: sh-appflowy
+            namespace: flowers
+            app: public-web
+        - Cloudflare Tunnel:
+            href: https://one.dash.cloudflare.com
+            description: Public ingress · ch33ky.org
+            icon: cloudflare-zero-trust.png
+            widget:
+              type: cloudflared
+              accountid: "{{HOMEPAGE_VAR_CF_ACCOUNT_ID}}"
+              tunnelid: "{{HOMEPAGE_VAR_CF_TUNNEL_ID}}"
+              key: "{{HOMEPAGE_VAR_CF_API_TOKEN}}"
+    - Private:
         - qBittorrent:
             href: https://cheeky-mini.tail2f4253.ts.net:8080
-            description: Torrent client · no VPN
+            description: Torrent client · via ProtonVPN
             icon: qbittorrent.png
             namespace: media
             app: qbittorrent
             widget:
               type: qbittorrent
               url: http://10.43.200.23:8080
-              username: admin
+              username: cheeky
               password: "{{HOMEPAGE_VAR_QBIT_PW}}"
-    - Documents:
+              enableLeechProgress: true
+              enableLeechSize: true
         - Field Vault:
             href: https://cheeky-mini.tail2f4253.ts.net:8091
             description: Vault · library · semantic search
-            icon: mdi-shield-key-outline
+            icon: sh-origamivault
             namespace: docs
             app: api
-    - Infrastructure:
+        - Flowers Admin:
+            href: https://cheeky-mini.tail2f4253.ts.net:8092
+            description: Sent bouquets · tailnet-only
+            icon: mdi-flower-outline
+            namespace: flowers
+            app: admin-web
+    - Infra:
         - Headlamp:
             href: https://cheeky-mini.tail2f4253.ts.net
             description: Kubernetes dashboard · tailnet-only
@@ -115,80 +129,49 @@ data:
         - pgweb:
             href: https://cheeky-mini.tail2f4253.ts.net:8081
             description: Docs + Flowers DB · tables, rows, read-only SQL
-            icon: mdi-database-search-outline
+            icon: sh-postgresql
             namespace: platform
             app: pgweb
-        - Cloudflare Tunnel:
-            href: https://one.dash.cloudflare.com
-            description: Public ingress · ch33ky.org
-            icon: cloudflare-zero-trust.png
         - Zot Registry:
             href: https://cheeky-mini.tail2f4253.ts.net:8095
             description: Self-hosted OCI registry · tailnet-only
-            icon: mdi-package-variant-closed
+            icon: sh-zot-registry-light
             namespace: platform
             app: zot
-    - AI:
+    - Platform:
         - Open WebUI:
             href: https://cheeky-mini.tail2f4253.ts.net:8094
             description: Chat UI onto vLLM (Qwen2.5-7B) · tailnet-only
-            icon: mdi-chat-processing-outline
+            icon: open-webui.png
             namespace: local-llm
             app: open-webui
         - Hermes Agent:
             href: https://cheeky-mini.tail2f4253.ts.net:8096
             description: Agent dashboard · WhatsApp via vLLM · tailnet-only
-            icon: mdi-robot-excited-outline
+            icon: sh-hermes-agent
             namespace: hermes
             app: hermes
-    - Gifts:
-        - Flowers:
-            href: https://flowers.ch33ky.org
-            description: Digital flower delivery · tie a bouquet, choose how long it lasts
-            icon: mdi-flower-tulip-outline
-            namespace: flowers
-            app: public-web
-        - Flowers Admin:
-            href: https://cheeky-mini.tail2f4253.ts.net:8092
-            description: Sent bouquets · tailnet-only
-            icon: mdi-flower-outline
-            namespace: flowers
-            app: admin-web
+        - Hindsight UI:
+            href: https://cheeky-mini.tail2f4253.ts.net:8097
+            description: Hermes memory bank · knowledge graph · tailnet-only
+            icon: sh-basic-memory-light
+            namespace: hermes
+            app: hermes
 
   widgets.yaml: |
-    - search:
-        provider: duckduckgo
-        target: _blank
     - kubernetes:
         cluster:
           show: true
           cpu: true
           memory: true
-          showLabel: true
-          label: cluster
         nodes:
-          show: false
-    - openmeteo:
-        label: Philadelphia
-        latitude: 39.9526
-        longitude: -75.1652
-        timezone: America/New_York
-        units: imperial
-    - datetime:
-        text_size: xl
-        format:
-          dateStyle: short
-          timeStyle: short
-          hourCycle: h23
+          show: true
+          cpu: true
+          memory: true
+          showLabel: true
 
   bookmarks.yaml: |
-    - Homelab:
-        - Repo:
-            - abbr: GH
-              href: https://github.com/rj-1234/homelab
-        - Jellyfin:
-            - abbr: JF
-              href: https://jellyfin.ch33ky.org
+    []
 
   kubernetes.yaml: |
     mode: cluster
