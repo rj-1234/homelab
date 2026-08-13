@@ -49,6 +49,38 @@ spec:
         runAsUser: 10000
         runAsGroup: 10000
         fsGroup: 10000
+      # Hermes's "custom" provider reads model.api_key as a literal string
+      # from config.yaml — confirmed by reading its own credential_sources.py/
+      # credential_pool.py: custom-provider credentials are seeded ONLY from
+      # config.yaml (model.api_key or custom_providers.<name>.api_key), never
+      # from an env var (that env-var path, `_seed_from_env`, only covers
+      # pre-registered named providers like openrouter — "custom" isn't in
+      # that registry). `${VLLM_API_KEY}`-style interpolation inside the
+      # YAML value does NOT happen — it gets sent to vLLM as that literal
+      # string, which is why this returned HTTP 401 the first time. Since we
+      # don't want the raw key committed to git in the ConfigMap, this
+      # initContainer does the substitution ourselves: renders the real
+      # config.yaml from the ConfigMap template into the shared /opt/data
+      # volume before the main containers start, using plain `sed` (no
+      # eval, no extra image dependency).
+      initContainers:
+        - name: render-config
+          image: 10.43.200.51:5000/hermes-agent:v2026.8.3
+          command: ["sh", "-c"]
+          args:
+            - >-
+              sed
+              -e "s|\${VLLM_API_KEY}|$VLLM_API_KEY|g"
+              -e "s|\${DASHBOARD_PW_HASH}|$DASHBOARD_PW_HASH|g"
+              /config-template/config.yaml > /opt/data/config.yaml
+          env:
+            - name: VLLM_API_KEY
+              valueFrom: { secretKeyRef: { name: vllm-api-key, key: key } }
+            - name: DASHBOARD_PW_HASH
+              valueFrom: { secretKeyRef: { name: hermes-dashboard-auth, key: password_hash } }
+          volumeMounts:
+            - { name: config, mountPath: /config-template, readOnly: true }
+            - { name: data, mountPath: /opt/data }
       containers:
         - name: gateway
           image: 10.43.200.51:5000/hermes-agent:v2026.8.3
@@ -66,7 +98,6 @@ spec:
               valueFrom: { secretKeyRef: { name: vllm-api-key, key: key } }
           volumeMounts:
             - { name: data, mountPath: /opt/data }
-            - { name: config, mountPath: /opt/data/config.yaml, subPath: config.yaml }
         - name: dashboard
           image: 10.43.200.51:5000/hermes-agent:v2026.8.3
           args: ["dashboard", "--host", "0.0.0.0", "--no-open"]
@@ -78,7 +109,6 @@ spec:
           ports: [{ name: dashboard, containerPort: 9119 }]
           volumeMounts:
             - { name: data, mountPath: /opt/data }
-            - { name: config, mountPath: /opt/data/config.yaml, subPath: config.yaml }
       volumes:
         - name: data
           hostPath: { path: /srv/hermes/data, type: Directory }
