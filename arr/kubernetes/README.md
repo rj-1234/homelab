@@ -42,6 +42,11 @@ sudo tailscale serve --bg --https=8080 http://10.43.200.23:8080   # qBittorrent
 2. Set save path `/data/torrents`, categories `movies`/`tv`.
 3. Add torrents/magnets manually (no indexer integration).
 4. After a download finishes, move/hardlink it into `/data/media/movies` or `/data/media/tv` and rescan the corresponding Jellyfin library.
+5. ProtonVPN's NAT-PMP forwarded port is dynamic, not the static `6881`
+   qBittorrent defaults to — read it and set it manually:
+   `kubectl -n media exec deploy/qbittorrent -c gluetun -- cat /tmp/gluetun/forwarded_port`,
+   then WebUI → Options → Connection → set that port, disable qBittorrent's
+   own UPnP/NAT-PMP (gluetun already handles forwarding).
 
 ## Notes
 - gluetun kill-switch: if the VPN drops, qBittorrent egress is blocked.
