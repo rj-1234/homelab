@@ -1,22 +1,31 @@
-# qBittorrent
+# Download automation (*arr stack)
 
-Standalone torrent client behind a VPN kill-switch (gluetun). No indexer or
-auto-organize automation — add torrents manually. In the `media` namespace,
-pinned to the node with the `rpool/data` dataset. Admin UI is
-**tailnet-only** (like Headlamp/Grafana).
+Auto-search + download + organize into the Jellyfin library. All in the
+`media` namespace, pinned to the node with the `rpool/data` dataset. Admin
+UIs are **tailnet-only** (like Headlamp/Grafana). qBittorrent rides a
+gluetun (ProtonVPN WireGuard) kill-switch; Prowlarr/Radarr/Sonarr don't need
+the VPN (indexer/API traffic, not torrent traffic).
 
 ```
-qBittorrent (via gluetun VPN) → downloads /data/torrents → move/hardlink → /data/media → Jellyfin
+Prowlarr ─(indexers)→ Radarr / Sonarr ─(release)→ qBittorrent (via gluetun VPN)
+                           │                            │
+                      monitors wanted        downloads straight into
+                           └──────────→ /data/media/{movies,tv} ←──────┘
+                                        │
+                                   Jellyfin (library volume, same path)
 ```
 
-Prowlarr/Radarr/Sonarr (indexer search + automated fetch/organize) were
-dropped as unneeded.
+Downloads land directly in the Jellyfin library path — no manual
+move/hardlink step. qBittorrent's categories and Radarr/Sonarr's root
+folders are both set to `/data/media/movies` / `/data/media/tv`, which is
+the same `/srv/data/media` hostPath Jellyfin's `library` volume already
+watches ([jellyfin/kubernetes/20-deployment.yaml](../../jellyfin/kubernetes/20-deployment.yaml)).
 
 ## Prerequisites (host)
 ```bash
 # ZFS dataset — single /data root so downloads + library share a filesystem
 sudo zfs create -o mountpoint=/srv/data -o compression=lz4 rpool/data
-sudo mkdir -p /srv/data/torrents/{movies,tv} /srv/data/media/{movies,tv}
+sudo mkdir -p /srv/data/media/{movies,tv}
 sudo chown -R 1000:1000 /srv/data
 
 # ProtonVPN WireGuard secret for gluetun (key from account.protonvpn.com, enable P2P)
@@ -28,20 +37,36 @@ kubectl -n media create secret generic gluetun-vpn \
 
 ## Deploy
 ```bash
-kubectl apply -f arr/kubernetes/qbittorrent.yaml
+kubectl apply -f arr/kubernetes/qbittorrent.yaml -f arr/kubernetes/prowlarr.yaml \
+  -f arr/kubernetes/radarr.yaml -f arr/kubernetes/sonarr.yaml
 ```
 
 ## Expose (tailnet-only)
-Pinned ClusterIP → `tailscale serve`:
+Pinned ClusterIPs → `tailscale serve` per port:
 ```bash
 sudo tailscale serve --bg --https=8080 http://10.43.200.23:8080   # qBittorrent
+sudo tailscale serve --bg --https=9696 http://10.43.200.20:9696   # Prowlarr
+sudo tailscale serve --bg --https=7878 http://10.43.200.21:7878   # Radarr
+sudo tailscale serve --bg --https=8989 http://10.43.200.22:8989   # Sonarr
 ```
 
 ## Wire-up
-1. Get temp admin password: `kubectl -n media logs deploy/qbittorrent -c qbittorrent | grep -i password`.
-2. Set save path `/data/torrents`, categories `movies`/`tv`.
-3. Add torrents/magnets manually (no indexer integration).
-4. After a download finishes, move/hardlink it into `/data/media/movies` or `/data/media/tv` and rescan the corresponding Jellyfin library.
+1. **qBittorrent** — WebUI login is set (not the linuxserver temp-password
+   flow — creds live in `platform/homepage/configmap.yaml`'s
+   `HOMEPAGE_VAR_QBIT_PW` reference / your own notes). Categories
+   `movies`/`tv` → save path `/data/media/movies` / `/data/media/tv`.
+2. **Prowlarr** — add indexers under Indexers. Then Settings → Apps → add:
+   - Radarr: `http://radarr.media.svc.cluster.local:7878` + its API key
+     (Radarr → Settings → General)
+   - Sonarr: `http://sonarr.media.svc.cluster.local:8989` + its API key
+     (Sonarr → Settings → General)
+3. **Radarr/Sonarr** — Settings → Download Clients → add qBittorrent
+   (`http://qbittorrent.media.svc.cluster.local:8080`, WebUI creds). Root
+   folder: `/data/media/movies` (Radarr), `/data/media/tv` (Sonarr).
+4. **Jellyfin** — `library` volume already mounts `/srv/data/media`; after
+   the first import, trigger one manual library scan. Optional follow-up:
+   point Radarr/Sonarr's "Jellyfin/Emby" notification connection at Jellyfin
+   to auto-trigger scans on import instead.
 5. ProtonVPN's NAT-PMP forwarded port is dynamic, not the static `6881`
    qBittorrent defaults to — read it and set it manually:
    `kubectl -n media exec deploy/qbittorrent -c gluetun -- cat /tmp/gluetun/forwarded_port`,
@@ -50,6 +75,9 @@ sudo tailscale serve --bg --https=8080 http://10.43.200.23:8080   # qBittorrent
 
 ## Notes
 - gluetun kill-switch: if the VPN drops, qBittorrent egress is blocked.
-- Hardlinks work because `/data/torrents` and `/data/media` are one dataset —
-  imports are instant and don't double disk usage. Keep both under `/data`.
+  Prowlarr/Radarr/Sonarr aren't behind it — only torrent transfer traffic
+  needs the tunnel.
+- Search plugins built into qBittorrent itself weren't used — Prowlarr is
+  the actual search layer (maintained indexer definitions; client-side
+  scraper plugins rot as tracker sites change).
 - Verify VPN IP: `kubectl -n media exec deploy/qbittorrent -c gluetun -- wget -qO- ifconfig.me`.

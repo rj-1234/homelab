@@ -92,6 +92,24 @@ data:
               password: "{{HOMEPAGE_VAR_QBIT_PW}}"
               enableLeechProgress: true
               enableLeechSize: true
+        - Prowlarr:
+            href: https://cheeky-mini.tail2f4253.ts.net:9696
+            description: Indexer search · tailnet-only
+            icon: prowlarr.png
+            namespace: media
+            app: prowlarr
+        - Radarr:
+            href: https://cheeky-mini.tail2f4253.ts.net:7878
+            description: Movies · auto-fetch & organize · tailnet-only
+            icon: radarr.png
+            namespace: media
+            app: radarr
+        - Sonarr:
+            href: https://cheeky-mini.tail2f4253.ts.net:8989
+            description: TV · auto-fetch & organize · tailnet-only
+            icon: sonarr.png
+            namespace: media
+            app: sonarr
         - Field Vault:
             href: https://cheeky-mini.tail2f4253.ts.net:8091
             description: Vault · library · semantic search

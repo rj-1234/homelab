@@ -19,6 +19,9 @@ OPENWEBUI_IP="${HOMELAB_OPENWEBUI_IP:-10.43.200.52}"   # pinned ClusterIP (Open 
 ZOT_IP="${HOMELAB_ZOT_IP:-10.43.200.51}"               # pinned ClusterIP (self-hosted registry, port 5000)
 HERMES_DASH_IP="${HOMELAB_HERMES_DASH_IP:-10.43.200.53}" # pinned ClusterIP (Hermes dashboard, port 9119)
 HERMES_HINDSIGHT_UI_IP="${HOMELAB_HERMES_HINDSIGHT_UI_IP:-10.43.200.54}" # pinned ClusterIP (Hindsight control-plane UI, port 8890)
+PROWLARR_IP="${HOMELAB_PROWLARR_IP:-10.43.200.20}"     # pinned ClusterIP (Prowlarr, port 9696)
+RADARR_IP="${HOMELAB_RADARR_IP:-10.43.200.21}"         # pinned ClusterIP (Radarr, port 7878)
+SONARR_IP="${HOMELAB_SONARR_IP:-10.43.200.22}"         # pinned ClusterIP (Sonarr, port 8989)
 # repo root = parent of this script's dir
 REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 
@@ -263,7 +266,10 @@ cmd_serve() {  # idempotent tailnet exposure for admin UIs
   sudo tailscale serve --bg --https=8095 "http://$ZOT_IP:5000"
   sudo tailscale serve --bg --https=8096 "http://$HERMES_DASH_IP:9119"
   sudo tailscale serve --bg --https=8097 "http://$HERMES_HINDSIGHT_UI_IP:8890"
-  info "serving Headlamp :443 + Grafana :$GRAFANA_TS_PORT + Flowers Admin :8092 + Traefik :8444 + Open WebUI :8094 + Zot :8095 + Hermes dashboard :8096 + Hindsight UI :8097 on $TAILNET_HOST"
+  sudo tailscale serve --bg --https=9696 "http://$PROWLARR_IP:9696"
+  sudo tailscale serve --bg --https=7878 "http://$RADARR_IP:7878"
+  sudo tailscale serve --bg --https=8989 "http://$SONARR_IP:8989"
+  info "serving Headlamp :443 + Grafana :$GRAFANA_TS_PORT + Flowers Admin :8092 + Traefik :8444 + Open WebUI :8094 + Zot :8095 + Hermes dashboard :8096 + Hindsight UI :8097 + Prowlarr :9696 + Radarr :7878 + Sonarr :8989 on $TAILNET_HOST"
   sudo tailscale serve status
 }
 cmd_restart() {
