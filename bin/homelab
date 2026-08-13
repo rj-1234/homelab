@@ -18,6 +18,7 @@ TRAEFIK_IP="${HOMELAB_TRAEFIK_IP:-10.43.200.40}"       # pinned ClusterIP (dashb
 OPENWEBUI_IP="${HOMELAB_OPENWEBUI_IP:-10.43.200.52}"   # pinned ClusterIP (Open WebUI, port 8080)
 ZOT_IP="${HOMELAB_ZOT_IP:-10.43.200.51}"               # pinned ClusterIP (self-hosted registry, port 5000)
 HERMES_DASH_IP="${HOMELAB_HERMES_DASH_IP:-10.43.200.53}" # pinned ClusterIP (Hermes dashboard, port 9119)
+HERMES_HINDSIGHT_UI_IP="${HOMELAB_HERMES_HINDSIGHT_UI_IP:-10.43.200.54}" # pinned ClusterIP (Hindsight control-plane UI, port 8890)
 # repo root = parent of this script's dir
 REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 
@@ -204,6 +205,7 @@ Private (Tailscale):
   Open WebUI    https://$TAILNET_HOST:8094
   Zot registry  https://$TAILNET_HOST:8095
   Hermes dash   https://$TAILNET_HOST:8096
+  Hindsight UI  https://$TAILNET_HOST:8097
 
 LAN:
   Jellyfin      http://$(server_ip):8096
@@ -222,6 +224,7 @@ cmd_health() {
     [open-webui]="http://$OPENWEBUI_IP:8080/health"
     [zot]="http://$ZOT_IP:5000/v2/"
     [hermes-dash]="http://$HERMES_DASH_IP:9119/"
+    [hindsight-ui]="http://$HERMES_HINDSIGHT_UI_IP:8890/api/health"
   )
   for name in "${!t[@]}"; do
     code=$(k -n platform run hl-health-$$-"$name" --rm -i --restart=Never -q \
@@ -259,7 +262,8 @@ cmd_serve() {  # idempotent tailnet exposure for admin UIs
   sudo tailscale serve --bg --https=8094 "http://$OPENWEBUI_IP:8080"
   sudo tailscale serve --bg --https=8095 "http://$ZOT_IP:5000"
   sudo tailscale serve --bg --https=8096 "http://$HERMES_DASH_IP:9119"
-  info "serving Headlamp :443 + Grafana :$GRAFANA_TS_PORT + Flowers Admin :8092 + Traefik :8444 + Open WebUI :8094 + Zot :8095 + Hermes dashboard :8096 on $TAILNET_HOST"
+  sudo tailscale serve --bg --https=8097 "http://$HERMES_HINDSIGHT_UI_IP:8890"
+  info "serving Headlamp :443 + Grafana :$GRAFANA_TS_PORT + Flowers Admin :8092 + Traefik :8444 + Open WebUI :8094 + Zot :8095 + Hermes dashboard :8096 + Hindsight UI :8097 on $TAILNET_HOST"
   sudo tailscale serve status
 }
 cmd_restart() {

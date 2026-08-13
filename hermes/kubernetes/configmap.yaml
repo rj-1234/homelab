@@ -12,9 +12,7 @@ metadata:
 data:
   config.yaml: |
     model:
-      provider: custom
-      base_url: "http://vllm.local-llm.svc.cluster.local:8000/v1"
-      api_key: "${VLLM_API_KEY}"   # from the gateway container's env, see 10-hermes.yaml
+      provider: vllm
       default: "llama-3.2-3b-instruct-awq"
       # local-llm's vLLM serves Llama-3.2-3B-Instruct-AWQ at 65536 —
       # genuinely native long context (no RoPE scaling hack) + fp8
@@ -23,6 +21,49 @@ data:
       # history (Qwen2.5-7B → YaRN attempt → Gemma 4 E4B → Llama-3.1-8B →
       # this). Keep in sync with vLLM's MAX_MODEL_LEN.
       context_length: 65536
+    # Named provider (not the bare `provider: custom` shorthand this used to
+    # be) so vLLM shows up as a selectable, persistent option in the
+    # dashboard's model picker — the old shorthand had its base_url/api_key
+    # living only inline under `model:`, which the picker overwrites
+    # wholesale on every switch, silently deleting vLLM access the moment
+    # you picked anything else with no way back except editing this file.
+    # discover_models: false — the endpoint only ever serves the one model,
+    # no need to live-probe /models on every picker load.
+    #
+    # context_length nested under models.<id> (a dict list item, not a bare
+    # string) because get_custom_provider_context_length() in hermes_cli/
+    # config.py — "the single source of truth for custom-provider context
+    # overrides" per its own docstring — reads ONLY
+    # providers.<name>.models.<id>.context_length for this provider shape.
+    # Its docstring warns every other path "fell back to the 128K default"
+    # before this lookup existed — confirmed by reading the live source, not
+    # assumed, since silently defaulting to 128K against a model that only
+    # has 65536 would reproduce the exact class of bug already spent hours
+    # fixing on Hindsight's side, on the main chat path instead. Kept at the
+    # top model: level too, redundant but harmless.
+    providers:
+      vllm:
+        api: "http://vllm.local-llm.svc.cluster.local:8000/v1"
+        api_key: "${VLLM_API_KEY}"   # from the gateway container's env, see 10-hermes.yaml
+        discover_models: false
+        models:
+          - id: llama-3.2-3b-instruct-awq
+            context_length: 65536
+    # Claude subscription models, opt-in only — main model above stays vLLM.
+    # `anthropic` provider is credentialed from CLAUDE_CODE_OAUTH_TOKEN (env,
+    # see 10-hermes.yaml), not from a key here. Switch with `/model claude`.
+    model_aliases:
+      claude:
+        model: claude-sonnet-5
+        provider: anthropic
+      claude-fast:
+        model: claude-haiku-4-5-20251001
+        provider: anthropic
+    # Hindsight (graph memory: entity resolution + cross-session recall).
+    # Behavioral config is a separate file, hindsight-config.json below —
+    # this just turns the provider on.
+    memory:
+      provider: hindsight
     context_compression:
       enabled: true
       threshold: 0.85
@@ -35,3 +76,27 @@ data:
       basic_auth:
         username: "admin"
         password_hash: "${DASHBOARD_PW_HASH}"
+  # Hindsight local-embedded mode: in-process daemon + embedded Postgres,
+  # no separate server. Points its extraction LLM at the same vLLM endpoint
+  # backing the main model — HINDSIGHT_LLM_API_KEY reuses vllm-api-key
+  # (see 10-hermes.yaml), no new Secret needed. No placeholder to substitute
+  # here, so this file is copied as-is by the initContainer, not sed'd.
+  #
+  # Tried routing extraction through the Claude subscription instead
+  # (retain's real schema — a discriminated union requiring
+  # what/when/where/who/why/fact_type per fact — proved too complex for
+  # Llama-3.2-3B-AWQ: 1130 completion tokens generated, 0 facts parsed,
+  # every time). Reverted: hindsight_api's anthropic client uses the plain
+  # `anthropic` SDK (x-api-key header), which CLAUDE_CODE_OAUTH_TOKEN isn't
+  # valid for — and separately, Anthropic's usage policy prohibits routing
+  # third-party tool traffic through subscription OAuth outside Claude Code/
+  # claude.ai entirely, so this isn't just a technical dead end. See memory
+  # hermes-hindsight-memory-provider for the full rationale.
+  hindsight-config.json: |
+    {
+      "mode": "local_embedded",
+      "llm_provider": "openai_compatible",
+      "llm_base_url": "http://vllm.local-llm.svc.cluster.local:8000/v1",
+      "llm_model": "llama-3.2-3b-instruct-awq",
+      "bank_id": "hermes"
+    }

@@ -6,6 +6,12 @@
 # Image is built+pushed by hand from a pinned release tag, not vendored
 # into this repo — see README for the exact build/push commands.
 #
+# Tag suffixed -local.1: carries a local patch on top of pinned v2026.8.3
+# (Hindsight retain content sent as plain text, not a JSON turn-array —
+# fixes fact extraction silently returning 0 facts on every message with
+# small local models. See memory hermes_hindsight_memory_provider for the
+# full root-cause trace and the patch itself).
+#
 # Two containers sharing this pod's network namespace replaces upstream's
 # docker-compose `network: host` + `depends_on` pattern: `dashboard`
 # reaches `gateway` over loopback, which a shared pod netns gives for free
@@ -27,6 +33,15 @@
 #     --from-literal=key="$(kubectl -n local-llm get secret vllm-api-key -o jsonpath='{.data.key}' | base64 -d)"
 #   kubectl -n hermes create secret generic hermes-dashboard-auth \
 #     --from-literal=password_hash='<output of hash_password(), see README>'
+#   kubectl -n hermes create secret generic anthropic-oauth-token \
+#     --from-literal=token='<output of `claude setup-token`, requires Claude
+#     Pro/Max login>'
+#
+# Claude subscription models (opt-in, vLLM stays the default main model):
+# `anthropic` is a built-in Hermes provider, credentialed straight from the
+# CLAUDE_CODE_OAUTH_TOKEN env var (no config.yaml templating needed for this
+# one, unlike VLLM_API_KEY above — see configmap.yaml's model_aliases: block).
+# Switch a session onto it with `/model claude`.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -65,7 +80,7 @@ spec:
       # eval, no extra image dependency).
       initContainers:
         - name: render-config
-          image: 10.43.200.51:5000/hermes-agent:v2026.8.3
+          image: 10.43.200.51:5000/hermes-agent:v2026.8.3-local.1
           command: ["sh", "-c"]
           args:
             # rm first: an empty root:root 0644 config.yaml already sits in
@@ -79,7 +94,9 @@ spec:
               sed
               -e "s|\${VLLM_API_KEY}|$VLLM_API_KEY|g"
               -e "s|\${DASHBOARD_PW_HASH}|$DASHBOARD_PW_HASH|g"
-              /config-template/config.yaml > /opt/data/config.yaml
+              /config-template/config.yaml > /opt/data/config.yaml &&
+              mkdir -p /opt/data/hindsight &&
+              cp /config-template/hindsight-config.json /opt/data/hindsight/config.json
           env:
             - name: VLLM_API_KEY
               valueFrom: { secretKeyRef: { name: vllm-api-key, key: key } }
@@ -90,7 +107,7 @@ spec:
             - { name: data, mountPath: /opt/data }
       containers:
         - name: gateway
-          image: 10.43.200.51:5000/hermes-agent:v2026.8.3
+          image: 10.43.200.51:5000/hermes-agent:v2026.8.3-local.1
           # args, not command — command overrides the image's ENTRYPOINT
           # (entrypoint-dispatch.sh, which parses "gateway run" itself and
           # keeps s6-overlay supervision intact); args only overrides CMD,
@@ -101,19 +118,119 @@ spec:
             - { name: HERMES_GID, value: "10000" }
             - { name: WHATSAPP_ENABLED, value: "true" }
             - { name: WHATSAPP_ALLOWED_USERS, value: "+13472164621" }
+            # Hindsight's embedded daemon (hindsight-api) is a subprocess with
+            # its own fresh interpreter — activate_durable_lazy_target() only
+            # patches sys.path for the current process, so the daemon can't
+            # see /opt/data/lazy-packages unless it's on PYTHONPATH too.
+            # Confirmed: `hindsight-api --help` ModuleNotFoundErrors without
+            # this, works with it.
+            - { name: PYTHONPATH, value: "/opt/data/lazy-packages" }
+            # Hindsight's retain/fact-extraction step defaults to requesting
+            # 64000 output tokens (sized for big cloud models) — leaves only
+            # ~1536 tokens of the 65536-token vLLM window for input, so every
+            # retain 400s regardless of content length. Cap it well below the
+            # window; RETAIN_CHUNK_SIZE=3000 is the floor this must exceed.
+            - { name: HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS, value: "8192" }
+            # Consolidation (merges/dedups retained facts) makes its own LLM
+            # calls with the same big-cloud-model-sized defaults as retain —
+            # same failure class as above, just not triggered yet since no
+            # facts have been consolidated. Recommended settings for small
+            # local models per vectorize-io/hindsight discussion #2199.
+            - { name: HINDSIGHT_API_CONSOLIDATION_LLM_BATCH_SIZE, value: "1" }
+            - { name: HINDSIGHT_API_CONSOLIDATION_MAX_MEMORIES_PER_ROUND, value: "30" }
+            - { name: HINDSIGHT_API_CONSOLIDATION_RECALL_BUDGET, value: "low" }
+            - { name: HINDSIGHT_API_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS, value: "4096" }
             - name: VLLM_API_KEY
+              valueFrom: { secretKeyRef: { name: vllm-api-key, key: key } }
+            - name: CLAUDE_CODE_OAUTH_TOKEN
+              valueFrom: { secretKeyRef: { name: anthropic-oauth-token, key: token } }
+            - name: HINDSIGHT_LLM_API_KEY
               valueFrom: { secretKeyRef: { name: vllm-api-key, key: key } }
           volumeMounts:
             - { name: data, mountPath: /opt/data }
         - name: dashboard
-          image: 10.43.200.51:5000/hermes-agent:v2026.8.3
+          image: 10.43.200.51:5000/hermes-agent:v2026.8.3-local.1
           args: ["dashboard", "--host", "0.0.0.0", "--no-open"]
           env:
             - { name: HERMES_UID, value: "10000" }
             - { name: HERMES_GID, value: "10000" }
+            - { name: PYTHONPATH, value: "/opt/data/lazy-packages" }
+            - { name: HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS, value: "8192" }
+            - { name: HINDSIGHT_API_CONSOLIDATION_LLM_BATCH_SIZE, value: "1" }
+            - { name: HINDSIGHT_API_CONSOLIDATION_MAX_MEMORIES_PER_ROUND, value: "30" }
+            - { name: HINDSIGHT_API_CONSOLIDATION_RECALL_BUDGET, value: "low" }
+            - { name: HINDSIGHT_API_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS, value: "4096" }
             - name: DASHBOARD_PW_HASH
               valueFrom: { secretKeyRef: { name: hermes-dashboard-auth, key: password_hash } }
+            - name: CLAUDE_CODE_OAUTH_TOKEN
+              valueFrom: { secretKeyRef: { name: anthropic-oauth-token, key: token } }
+            - name: HINDSIGHT_LLM_API_KEY
+              valueFrom: { secretKeyRef: { name: vllm-api-key, key: key } }
           ports: [{ name: dashboard, containerPort: 9119 }]
+          volumeMounts:
+            - { name: data, mountPath: /opt/data }
+        # Hindsight's own control-plane UI (`hindsight-embed ui start`) is
+        # unsafe to use as-is: it health-checks and (if "not running") tries
+        # to relaunch the daemon on a profile-tracked port that hindsight-api
+        # can silently miss binding in --daemon mode (see vectorize-io/
+        # hindsight#263 — our named-profile case isn't covered by that
+        # issue's fix). That relaunch would collide with the real daemon
+        # already running in the gateway container. Bypassing the wrapper:
+        # the UI it would have launched is just the
+        # @vectorize-io/hindsight-control-plane npm package with an explicit
+        # --api-url flag, so run that directly instead of letting the
+        # wrapper guess.
+        #
+        # The daemon's actual bind port is NOT stable across restarts —
+        # confirmed live: one run bound 8888 (DEFAULT_DAEMON_PORT, the
+        # main.py:139-141 fallback), the next bound 9177 (the profile's own
+        # allocated port) — a race between two independent writers of the
+        # same profile .env file (Hermes's own plugin vs. hindsight_embed's
+        # port-allocator) decides which side of that fallback triggers each
+        # time. Hermes's gateway process stays correct regardless (it
+        # resolves the port through the same call chain the daemon itself
+        # used), but a hardcoded --api-url here would silently point at the
+        # wrong port on some fraction of restarts. Probe both known values
+        # and launch against whichever answers, instead of guessing one.
+        - name: hindsight-ui
+          image: 10.43.200.51:5000/hermes-agent:v2026.8.3-local.1
+          # command + args together replace ENTRYPOINT+CMD — unlike
+          # gateway/dashboard above, this isn't a hermes subcommand, so
+          # entrypoint-dispatch.sh must be bypassed entirely, not just CMD.
+          command: ["sh", "-c"]
+          env:
+            # The image ships /opt/hermes/.npmrc with min-release-age=14 (a
+            # real supply-chain-security default: reject package versions
+            # published <14 days ago), scoped by its exclude-list to Hermes's
+            # own package set only. hindsight-control-plane's nanoid
+            # dependency isn't in that allowlist and got rejected — confirmed
+            # by testing the install with/without this override. Scoped to
+            # this one container's own npx install, not a blanket disable of
+            # the image's default.
+            - { name: NPM_CONFIG_MIN_RELEASE_AGE, value: "0" }
+          # Control-plane version pinned to 0.8.6, matching our installed
+          # hindsight_embed — its own code defaults to its own __version__
+          # "so the stack stays in lockstep". @latest (0.9.0) failed outright:
+          # nanoid@^3.3.17 unresolvable in its dependency tree.
+          # The embedded daemon stops after 5 min idle and only restarts on
+          # the next real chat message needing memory — so "no daemon yet"
+          # is a normal, routine state for this sidecar to sit in, not a
+          # failure. Wait indefinitely rather than timing out.
+          args:
+            - >-
+              api_url="" &&
+              while [ -z "$api_url" ]; do
+                for p in 8888 9177; do
+                  if curl -sf -m 2 "http://127.0.0.1:$p/health" >/dev/null 2>&1; then
+                    api_url="http://127.0.0.1:$p"; break;
+                  fi
+                done;
+                [ -n "$api_url" ] || sleep 5;
+              done &&
+              echo "daemon found at $api_url" &&
+              exec npx -y @vectorize-io/hindsight-control-plane@0.8.6
+              --port 8890 --hostname 0.0.0.0 --api-url "$api_url"
+          ports: [{ name: hindsight-ui, containerPort: 8890 }]
           volumeMounts:
             - { name: data, mountPath: /opt/data }
       volumes:
@@ -133,3 +250,17 @@ spec:
   clusterIP: 10.43.200.53
   selector: { app.kubernetes.io/name: hermes }
   ports: [{ name: dashboard, port: 9119, targetPort: dashboard }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes-hindsight-ui
+  namespace: hermes
+  labels: { app.kubernetes.io/name: hermes }
+spec:
+  type: ClusterIP
+  # next free in the 10.43.200.5x pinned-ClusterIP block (.50 vllm, .51 zot,
+  # .52 open-webui, .53 hermes-dash)
+  clusterIP: 10.43.200.54
+  selector: { app.kubernetes.io/name: hermes }
+  ports: [{ name: hindsight-ui, port: 8890, targetPort: hindsight-ui }]

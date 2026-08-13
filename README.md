@@ -229,13 +229,26 @@ where Docker + Zot both live — no upstream image published, and no
 Dockerfile is vendored into this repo, it's built straight from their
 source):
 
+Carries one local patch on top of the pinned tag: `plugins/memory/hindsight/__init__.py`'s
+`sync_turn()` sent retain content as a JSON array of `{role,content,timestamp}`
+turn-dicts, which Hindsight's own chunker never reformats into prose before
+handing it to the extraction LLM — small local models pattern-match the raw
+JSON instead of extracting facts from it (see memory
+`hermes_hindsight_memory_provider` for the full root-cause trace). Patched to
+send plain `"User: ...\nAssistant: ..."` text instead. Re-apply this patch (or
+`git diff` it forward) on any future tag bump — it doesn't exist upstream.
+Tag suffixed `-local.N` rather than reusing the upstream tag so
+`imagePullPolicy: IfNotPresent` (the default, unset in `10-hermes.yaml`)
+can't silently keep serving stale cached layers after a patch:
+
 ```bash
 # on cheeky
 git clone --depth 1 --branch v2026.8.3 https://github.com/NousResearch/hermes-agent.git /tmp/hermes-agent
 cd /tmp/hermes-agent
-docker build -t 10.43.200.51:5000/hermes-agent:v2026.8.3 .
-docker push 10.43.200.51:5000/hermes-agent:v2026.8.3
-docker run --rm 10.43.200.51:5000/hermes-agent:v2026.8.3 id hermes   # confirm the UID/GID hermes/kubernetes/10-hermes.yaml assumes (10000:10000)
+# apply the retain-content-format patch (see memory hermes_hindsight_memory_provider), then:
+docker build -t 10.43.200.51:5000/hermes-agent:v2026.8.3-local.1 .
+docker push 10.43.200.51:5000/hermes-agent:v2026.8.3-local.1
+docker run --rm 10.43.200.51:5000/hermes-agent:v2026.8.3-local.1 id hermes   # confirm the UID/GID hermes/kubernetes/10-hermes.yaml assumes (10000:10000)
 
 # on cheeky-mini, containerd trust for Zot (mirrors cheeky's Docker daemon config)
 sudo mkdir -p /etc/rancher/k3s
@@ -247,8 +260,15 @@ sudo mkdir -p /srv/hermes/data && sudo chown 10000:10000 /srv/hermes/data   # on
 kubectl apply -f hermes/kubernetes/00-namespace.yaml
 kubectl -n hermes create secret generic vllm-api-key \
   --from-literal=key="$(kubectl -n local-llm get secret vllm-api-key -o jsonpath='{.data.key}' | base64 -d)"
+kubectl -n hermes create secret generic anthropic-oauth-token \
+  --from-literal=token='<output of `claude setup-token`, needs Claude Pro/Max login>'
 homelab apply hermes
 ```
+
+Claude subscription models (opt-in — `/model claude` in a session, vLLM stays
+the default): the `anthropic-oauth-token` secret above carries the
+`CLAUDE_CODE_OAUTH_TOKEN` Hermes's built-in `anthropic` provider reads
+directly, no separate Anthropic API billing needed.
 
 WhatsApp pairing (one-time, scan the printed QR):
 ```bash
