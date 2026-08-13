@@ -9,23 +9,31 @@ the VPN (indexer/API traffic, not torrent traffic).
 ```
 Prowlarr ─(indexers)→ Radarr / Sonarr ─(release)→ qBittorrent (via gluetun VPN)
                            │                            │
-                      monitors wanted        downloads straight into
-                           └──────────→ /data/media/{movies,tv} ←──────┘
+                      monitors wanted      downloads into /data/torrents/{movies,tv}
+                           │                            │ (staging — outside Jellyfin's
+                           │                            │  scanned folders)
+                           └──── import: hardlink + rename ────┘
+                                        │
+                                 /data/media/{movies,tv}
                                         │
                                    Jellyfin (library volume, same path)
 ```
 
-Downloads land directly in the Jellyfin library path — no manual
-move/hardlink step. qBittorrent's categories and Radarr/Sonarr's root
-folders are both set to `/data/media/movies` / `/data/media/tv`, which is
-the same `/srv/data/media` hostPath Jellyfin's `library` volume already
-watches ([jellyfin/kubernetes/20-deployment.yaml](../../jellyfin/kubernetes/20-deployment.yaml)).
+qBittorrent's categories save into `/data/torrents/{movies,tv}` — staging,
+**not** scanned by Jellyfin. Radarr/Sonarr import completed downloads from
+there into `/data/media/{movies,tv}` (hardlink, same dataset, no extra disk
+use) under their own clean naming — that's the only copy Jellyfin ever sees.
+Keeping the raw qBittorrent download and the *arr-organized copy in
+*separate* trees is the point: if qBittorrent saved straight into
+`/data/media` too, Jellyfin would show two entries for the same file (the
+raw torrent-named one *and* Radarr/Sonarr's renamed one) — hit this for real
+once, cleaned it up manually, this layout is why it won't recur.
 
 ## Prerequisites (host)
 ```bash
 # ZFS dataset — single /data root so downloads + library share a filesystem
 sudo zfs create -o mountpoint=/srv/data -o compression=lz4 rpool/data
-sudo mkdir -p /srv/data/media/{movies,tv}
+sudo mkdir -p /srv/data/torrents/{movies,tv} /srv/data/media/{movies,tv}
 sudo chown -R 1000:1000 /srv/data
 
 # ProtonVPN WireGuard secret for gluetun (key from account.protonvpn.com, enable P2P)
@@ -54,7 +62,9 @@ sudo tailscale serve --bg --https=8989 http://10.43.200.22:8989   # Sonarr
 1. **qBittorrent** — WebUI login is set (not the linuxserver temp-password
    flow — creds live in `platform/homepage/configmap.yaml`'s
    `HOMEPAGE_VAR_QBIT_PW` reference / your own notes). Categories
-   `movies`/`tv` → save path `/data/media/movies` / `/data/media/tv`.
+   `movies`/`tv` → save path `/data/torrents/movies` / `/data/torrents/tv`
+   (staging — Radarr/Sonarr import from here, don't point this at
+   `/data/media` or Jellyfin will double-list everything).
 2. **Prowlarr** — add indexers under Indexers. Then Settings → Apps → add:
    - Radarr: `http://radarr.media.svc.cluster.local:7878` + its API key
      (Radarr → Settings → General)
