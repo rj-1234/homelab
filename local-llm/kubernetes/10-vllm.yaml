@@ -48,22 +48,9 @@ spec:
               --api-key "$VLLM_API_KEY"
               --port 8000
           env:
-            # Was Qwen2.5-7B-Instruct-AWQ (native 32768, below Hermes
-            # Agent's hard 64K context floor). Tried RoPE-extrapolating it
-            # via YaRN — broke output quality. Tried Gemma 4 E4B for real
-            # native long-context + multimodal — failed to boot at all
-            # (`AmbiguousGlobalPerLayerAttributeError`, its per-layer
-            # config format isn't supported by this vLLM version yet).
-            # Tried Llama-3.1-8B-Instruct-AWQ — booted, but the math doesn't
-            # close on this GPU: weights alone took 5.39GiB, and full
-            # (non-sliding-window) attention needs ~128KB/token of KV
-            # cache, so 65536 tokens needs ~8GiB more — vLLM's own error
-            # confirmed max feasible length at these settings was ~16.5K.
-            # No amount of gpu-memory-utilization/fp8-KV-cache tuning closes
-            # an ~8GiB gap on a 9.64GiB-usable card. Settled on
-            # Llama-3.2-3B-Instruct instead — same native 128K context and
-            # llama3_json tool-calling, ~3.5GiB lighter on weights, which is
-            # what actually needed to change (not the tuning knobs).
+            # Model-selection history (Qwen2.5 -> YaRN -> Gemma4 -> 3.1-8B,
+            # all rejected before landing here): see memory
+            # vllm-model-selection-history.
             - { name: MODEL_ID, value: "casperhansen/llama-3.2-3b-instruct-awq" }
             # Slash-free alias for the API-facing `model` field — OpenClaw's
             # config parses model refs as "provider/model", and the raw
@@ -75,38 +62,18 @@ spec:
             # earlier model. Starting conservative again for the same
             # reason; raise once a clean boot confirms real headroom.
             - { name: GPU_MEM_UTIL, value: "0.80" }
-            # Native context is 128K — targeting 65536 (comfortably above
-            # Hermes's 64K floor) rather than the full window, to leave
-            # KV-cache margin on a 10GB card.
+            # Native context is 128K — targeting 65536 (Hermes's floor) to
+            # leave KV-cache margin on a 10GB card.
             - { name: MAX_MODEL_LEN, value: "65536" }
-            # At 0.80 util this model alone left only 5.26GiB for KV cache
-            # (65536 tokens needs 7.0GiB) — vLLM's own error put the max
-            # feasible length at ~49K without this. fp8 halves bytes/token,
-            # closing the gap with real margin (unlike pushing
-            # gpu-memory-utilization to ~0.95, which would close it with
-            # ~zero slack on a card that's already desktop-not-headless
-            # constrained). Unlike the earlier YaRN attempt, fp8 here is
-            # isolated — no RoPE hack stacked on top, this model's 128K is
-            # genuinely native — so this is the clean single-variable test
-            # the YaRN incident's own follow-up notes called for. Confirm
-            # with a real multi-turn chat before trusting it, not just a
-            # healthy startup log (that's exactly what YaRN's failure
-            # looked like too).
+            # fp8 KV-cache needed to fit 65536 tokens in the VRAM left after
+            # weights at 0.80 util; genuinely native 128K context, no RoPE
+            # hack stacked on top. See memory vllm-model-selection-history.
             - { name: KV_CACHE_DTYPE, value: "fp8" }
             - { name: TOOL_CALL_PARSER, value: "llama3_json" }
-            # We'd been running on whatever default chat template the AWQ
-            # quant shipped with — never the template vLLM's own docs say
-            # tool-calling actually needs. Real repro before this fix: 3/3
-            # "Hello" (no weather content at all, one irrelevant get_weather
-            # tool defined) spuriously called get_weather("New York") every
-            # time. vLLM's docs explicitly warn "Llama's smaller models
-            # frequently fail to emit tool calls in the correct format"
-            # even with the right template — this may not fully fix it,
-            # but it's the documented starting point before concluding the
-            # model itself is the problem. If this doesn't help, try
-            # tool_chat_template_llama3.2_pythonic.jinja + TOOL_CALL_PARSER
-            # "pythonic" instead — vLLM's specifically-recommended
-            # alternative for the 1B/3B class.
+            # Must match TOOL_CALL_PARSER; without it this model spuriously
+            # calls tools on plain messages. See memory
+            # vllm-model-selection-history for the repro + fallback
+            # (pythonic template/parser) if it resurfaces.
             - { name: CHAT_TEMPLATE, value: "/vllm-workspace/examples/tool_chat_template_llama3.2_json.jinja" }
             - { name: HF_HOME, value: /root/.cache/huggingface }
             - name: VLLM_API_KEY
