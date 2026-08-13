@@ -68,7 +68,14 @@ spec:
           image: 10.43.200.51:5000/hermes-agent:v2026.8.3
           command: ["sh", "-c"]
           args:
+            # rm first: an empty root:root 0644 config.yaml already sits in
+            # /opt/data (created before this initContainer existed, likely
+            # by kubelet materializing the old subPath mount target as root
+            # before securityContext dropped privileges) — UID 10000 can't
+            # write into a root-owned file directly, but it does own the
+            # parent dir, so it can unlink it and create a fresh one.
             - >-
+              rm -f /opt/data/config.yaml &&
               sed
               -e "s|\${VLLM_API_KEY}|$VLLM_API_KEY|g"
               -e "s|\${DASHBOARD_PW_HASH}|$DASHBOARD_PW_HASH|g"
