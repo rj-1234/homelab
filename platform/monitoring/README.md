@@ -39,5 +39,17 @@ kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-passwor
   kubeProxy / kubeEtcd scrapers — k3s binds them to localhost, so the default
   ServiceMonitors would be perpetual red targets.
 - Storage on `rpool` via local-path: Prometheus 20Gi (15d retention), Grafana 5Gi.
-- Enable Alertmanager later by flipping `alertmanager.enabled: true` and
-  `helm upgrade`.
+- **Alerting** runs on Grafana's own built-in unified alerting (not
+  Alertmanager, which stays off — saves a pod/RAM). Rules, the ntfy contact
+  point, and the notification policy are provisioned via a sidecar-loaded
+  ConfigMap, same mechanism as dashboards: see
+  [alerting.yaml](alerting.yaml) (`grafana_alert: "1"` label).
+- Default (stock) dashboards are disabled
+  (`grafana.defaultDashboardsEnabled: false`) — only the curated
+  [dashboard-overview.yaml](dashboard-overview.yaml) ships.
+- Grafana admin password lives only in the `grafana-admin` Secret — if it
+  ever drifts (e.g. changed via the UI, or an upgrade migration issue), the
+  simplest fix is deleting the `monitoring-grafana` PVC and letting it
+  reinitialize from the Secret on a fresh boot (dashboards/alerts are
+  GitOps'd via the sidecar ConfigMaps, so nothing is lost — Prometheus's own
+  PVC is separate and untouched).

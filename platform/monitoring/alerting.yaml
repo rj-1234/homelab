@@ -1,0 +1,149 @@
+---
+# Grafana unified alerting, provisioned via the same sidecar mechanism as
+# dashboards (grafana_alert label instead of grafana_dashboard). No
+# Alertmanager — alertmanager.enabled stays false, Grafana's own built-in
+# alerting engine evaluates rules and sends notifications directly.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-alerting-homelab
+  namespace: monitoring
+  labels:
+    grafana_alert: "1"
+data:
+  homelab-alerting.yaml: |
+    apiVersion: 1
+
+    contactPoints:
+      - orgId: 1
+        name: ntfy
+        receivers:
+          - uid: ntfy-webhook
+            type: webhook
+            settings:
+              url: https://ntfy.sh/homelab-cheeky-597999510b6c
+              httpMethod: POST
+
+    policies:
+      - orgId: 1
+        receiver: ntfy
+        group_by: ["alertname"]
+        group_wait: 30s
+        group_interval: 5m
+        repeat_interval: 4h
+
+    groups:
+      - orgId: 1
+        name: homelab
+        folder: Homelab
+        interval: 60s
+        rules:
+          - uid: homelab-node-not-ready
+            title: NodeNotReady
+            condition: A
+            for: 5m
+            noDataState: OK
+            execErrState: Alerting
+            data:
+              - refId: A
+                datasourceUid: prometheus
+                model:
+                  refId: A
+                  datasource: { type: prometheus, uid: prometheus }
+                  expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+                  instant: true
+                  range: false
+                  intervalMs: 1000
+                  maxDataPoints: 43200
+            labels:
+              severity: critical
+            annotations:
+              summary: "Node {{ $labels.node }} is not Ready"
+
+          - uid: homelab-pod-crash-looping
+            title: PodCrashLooping
+            condition: A
+            for: 5m
+            noDataState: OK
+            execErrState: Alerting
+            data:
+              - refId: A
+                datasourceUid: prometheus
+                model:
+                  refId: A
+                  datasource: { type: prometheus, uid: prometheus }
+                  expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
+                  instant: true
+                  range: false
+                  intervalMs: 1000
+                  maxDataPoints: 43200
+            labels:
+              severity: warning
+            annotations:
+              summary: "{{ $labels.namespace }}/{{ $labels.pod }} restarting repeatedly"
+
+          - uid: homelab-high-disk-usage
+            title: HighDiskUsage
+            condition: A
+            for: 10m
+            noDataState: OK
+            execErrState: Alerting
+            data:
+              - refId: A
+                datasourceUid: prometheus
+                model:
+                  refId: A
+                  datasource: { type: prometheus, uid: prometheus }
+                  expr: 100 - (node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay|squashfs"} * 100) > 85
+                  instant: true
+                  range: false
+                  intervalMs: 1000
+                  maxDataPoints: 43200
+            labels:
+              severity: warning
+            annotations:
+              summary: "Root filesystem on {{ $labels.instance }} over 85% full"
+
+          - uid: homelab-high-memory-pressure
+            title: HighMemoryPressure
+            condition: A
+            for: 10m
+            noDataState: OK
+            execErrState: Alerting
+            data:
+              - refId: A
+                datasourceUid: prometheus
+                model:
+                  refId: A
+                  datasource: { type: prometheus, uid: prometheus }
+                  expr: 100 * (1 - sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes)) > 90
+                  instant: true
+                  range: false
+                  intervalMs: 1000
+                  maxDataPoints: 43200
+            labels:
+              severity: critical
+            annotations:
+              summary: "Cluster memory usage over 90%"
+
+          - uid: homelab-prometheus-target-down
+            title: PrometheusTargetDown
+            condition: A
+            for: 5m
+            noDataState: OK
+            execErrState: Alerting
+            data:
+              - refId: A
+                datasourceUid: prometheus
+                model:
+                  refId: A
+                  datasource: { type: prometheus, uid: prometheus }
+                  expr: up == 0
+                  instant: true
+                  range: false
+                  intervalMs: 1000
+                  maxDataPoints: 43200
+            labels:
+              severity: warning
+            annotations:
+              summary: "Scrape target {{ $labels.job }}/{{ $labels.instance }} is down"

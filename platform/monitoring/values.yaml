@@ -50,6 +50,15 @@ grafana:
     passwordKey: admin-password
   service:
     type: ClusterIP
+  # Stock dashboards (~20, incl. ones for kubeControllerManager/kubeScheduler/
+  # kubeProxy/kubeEtcd whose scrapers are disabled above — permanent no-data)
+  # dropped in favor of the curated dashboard(s) below.
+  defaultDashboardsEnabled: false
+  sidecar:
+    alerts:
+      enabled: true
+      label: grafana_alert
+      labelValue: "1"
   persistence:
     enabled: true
     storageClassName: local-path
