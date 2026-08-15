@@ -1,0 +1,92 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: containerssh-config
+  namespace: containerssh
+data:
+  config.yaml: |
+    ssh:
+      listen: "0.0.0.0:2222"
+      hostkeys:
+        - /etc/containerssh/hostkey/ssh_host_ed25519_key
+
+    # Webhook base URL only — ContainerSSH appends /pubkey or /password itself.
+    auth:
+      publicKey:
+        method: webhook
+        webhook:
+          url: http://containerssh-auth-webhook.containerssh.svc.cluster.local:8080
+      password:
+        method: webhook
+        webhook:
+          url: http://containerssh-auth-webhook.containerssh.svc.cluster.local:8080
+
+    backend: kubernetes
+    kubernetes:
+      connection:
+        host: kubernetes.default.svc
+        cacertFile: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      pod:
+        metadata:
+          namespace: containerssh-guests
+        spec:
+          # Guest shell users never get a k8s API token of their own.
+          automountServiceAccountToken: false
+          containers:
+            - name: shell
+              image: containerssh/containerssh-guest-image
+              resources:
+                requests: { cpu: 100m, memory: 128Mi }
+                limits: { cpu: "500m", memory: 256Mi }
+      timeouts:
+        podStart: 60s
+        podStop: 30s
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: containerssh
+  namespace: containerssh
+  labels: { app.kubernetes.io/name: containerssh }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app.kubernetes.io/name: containerssh } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: containerssh } }
+    spec:
+      serviceAccountName: containerssh
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - { key: kubernetes.io/hostname, operator: In, values: ["cheeky-mini"] }
+      containers:
+        - name: containerssh
+          image: containerssh/containerssh:v0.6
+          args: ["-config", "/etc/containerssh/config.yaml"]
+          ports: [{ name: ssh, containerPort: 2222 }]
+          volumeMounts:
+            - { name: config, mountPath: /etc/containerssh/config.yaml, subPath: config.yaml }
+            - { name: hostkey, mountPath: /etc/containerssh/hostkey, readOnly: true }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - { name: config, configMap: { name: containerssh-config } }
+        - { name: hostkey, secret: { secretName: containerssh-hostkey } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: containerssh
+  namespace: containerssh
+  labels: { app.kubernetes.io/name: containerssh }
+spec:
+  type: ClusterIP
+  clusterIP: 10.43.200.55        # pinned for tailscale serve --tcp
+  selector: { app.kubernetes.io/name: containerssh }
+  ports: [{ name: ssh, port: 2222, targetPort: ssh }]

@@ -1,0 +1,15 @@
+---
+# Two namespaces on purpose: ContainerSSH itself + the auth webhook live in
+# `containerssh`; on-demand session pods land in `containerssh-guests`. RBAC
+# (20-rbac.yaml) only ever grants pod-create/exec in the guest namespace —
+# ContainerSSH's own ServiceAccount never gets touch access to its own
+# namespace or anything else in the cluster.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: containerssh
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: containerssh-guests

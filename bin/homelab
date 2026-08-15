@@ -22,6 +22,8 @@ HERMES_HINDSIGHT_UI_IP="${HOMELAB_HERMES_HINDSIGHT_UI_IP:-10.43.200.54}" # pinne
 PROWLARR_IP="${HOMELAB_PROWLARR_IP:-10.43.200.20}"     # pinned ClusterIP (Prowlarr, port 9696)
 RADARR_IP="${HOMELAB_RADARR_IP:-10.43.200.21}"         # pinned ClusterIP (Radarr, port 7878)
 SONARR_IP="${HOMELAB_SONARR_IP:-10.43.200.22}"         # pinned ClusterIP (Sonarr, port 8989)
+CONTAINERSSH_IP="${HOMELAB_CONTAINERSSH_IP:-10.43.200.55}" # pinned ClusterIP (ContainerSSH, port 2222)
+WETTY_IP="${HOMELAB_WETTY_IP:-10.43.200.56}"           # pinned ClusterIP (Wetty web terminal, port 3000)
 # repo root = parent of this script's dir
 REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 
@@ -269,7 +271,9 @@ cmd_serve() {  # idempotent tailnet exposure for admin UIs
   sudo tailscale serve --bg --https=9696 "http://$PROWLARR_IP:9696"
   sudo tailscale serve --bg --https=7878 "http://$RADARR_IP:7878"
   sudo tailscale serve --bg --https=8989 "http://$SONARR_IP:8989"
-  info "serving Headlamp :443 + Grafana :$GRAFANA_TS_PORT + Flowers Admin :8092 + Traefik :8444 + Open WebUI :8094 + Zot :8095 + Hermes dashboard :8096 + Hindsight UI :8097 + Prowlarr :9696 + Radarr :7878 + Sonarr :8989 on $TAILNET_HOST"
+  sudo tailscale serve --bg --tcp=2222 "tcp://$CONTAINERSSH_IP:2222"
+  sudo tailscale serve --bg --https=8098 "http://$WETTY_IP:3000"
+  info "serving Headlamp :443 + Grafana :$GRAFANA_TS_PORT + Flowers Admin :8092 + Traefik :8444 + Open WebUI :8094 + Zot :8095 + Hermes dashboard :8096 + Hindsight UI :8097 + Prowlarr :9696 + Radarr :7878 + Sonarr :8989 + ContainerSSH :2222 + Wetty :8098 on $TAILNET_HOST"
   sudo tailscale serve status
 }
 cmd_restart() {

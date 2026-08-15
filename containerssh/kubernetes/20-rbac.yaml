@@ -1,0 +1,39 @@
+---
+# Least-privilege scope: create/exec/delete pods only in containerssh-guests,
+# nowhere else. Narrower than the wildcard verb ("*") the upstream
+# ContainerSSH docs show for the Kubernetes backend.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: containerssh
+  namespace: containerssh
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: containerssh-guest-manager
+  namespace: containerssh-guests
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: containerssh-guest-manager
+  namespace: containerssh-guests
+subjects:
+  - kind: ServiceAccount
+    name: containerssh
+    namespace: containerssh
+roleRef:
+  kind: Role
+  name: containerssh-guest-manager
+  apiGroup: rbac.authorization.k8s.io

@@ -136,6 +136,12 @@ data:
             icon: mdi-flower-outline
             namespace: flowers
             app: admin-web
+        - Wetty:
+            href: https://cheeky-mini.tail2f4253.ts.net:8098
+            description: Web terminal · isolated shell per session
+            icon: wetty.png
+            namespace: containerssh
+            app: wetty
     - Infra:
         - Headlamp:
             href: https://cheeky-mini.tail2f4253.ts.net
