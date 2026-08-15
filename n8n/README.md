@@ -43,9 +43,15 @@ add it only when a concrete workflow needs it.
 
 ## Prerequisites
 
-Host data dir on `cheeky-mini`:
+Host data dirs on `cheeky-mini` — both, not just n8n's own data dir. Postgres's
+`DirectoryOrCreate` hostPath gets auto-created by kubelet as `root:root` if it
+doesn't exist yet, and `fsGroup` in the pod spec doesn't reliably chown
+hostPath volumes the way it does PVCs — skip this and `postgres` CrashLoopBackOffs
+on `mkdir: cannot create directory '/var/lib/postgresql/data/pgdata':
+Permission denied`:
 ```bash
 sudo mkdir -p /srv/n8n/data && sudo chown 1000:1000 /srv/n8n/data
+sudo mkdir -p /srv/n8n/pg && sudo chown 999:999 /srv/n8n/pg
 ```
 
 Secrets (never committed):

@@ -4,6 +4,13 @@
 # flowers' Postgres (separate namespace, separate Secret, separate data
 # dir) — same pattern as those two.
 #
+# Host prep on cheeky-mini before first apply — DirectoryOrCreate makes
+# kubelet auto-create this dir as root:root if missing, and fsGroup doesn't
+# reliably chown hostPath volumes the way it does PVCs, so skipping this
+# CrashLoopBackOffs on "mkdir: cannot create directory
+# '/var/lib/postgresql/data/pgdata': Permission denied":
+#   sudo mkdir -p /srv/n8n/pg && sudo chown 999:999 /srv/n8n/pg
+#
 # Secret is created out-of-band, NEVER committed:
 #   kubectl -n n8n create secret generic n8n-postgres \
 #     --from-literal=POSTGRES_USER=n8n \

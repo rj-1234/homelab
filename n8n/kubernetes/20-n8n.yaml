@@ -11,7 +11,8 @@
 # way; that's an accepted tradeoff, see README for the carve-out path if a
 # specific integration ever needs it.
 #
-# Host prep on cheeky-mini before first apply:
+# Host prep on cheeky-mini before first apply (both dirs — see
+# 10-postgres.yaml for why Postgres's own hostPath needs the same treatment):
 #   sudo mkdir -p /srv/n8n/data && sudo chown 1000:1000 /srv/n8n/data
 #
 # Secrets, created out-of-band, NEVER committed:
