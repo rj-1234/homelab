@@ -17,7 +17,7 @@ Creds & secrets
   token [dur]          Headlamp login bearer token (default 168h)
   grafana-pw           print Grafana admin password
   creds                gather every service credential into gitignored CREDENTIALS.md
-  pgweb-sync           mirror doccat-postgres + flowers-postgres into platform for pgweb
+  pgweb-sync           mirror doccat-postgres + flowers-postgres + n8n-postgres into platform for pgweb
   set-cf-token         paste + store a new cloudflared token, restart connector
   set-grafana-pw [pw]  set/rotate Grafana password (random if omitted)
   check-secrets        verify required secrets exist
@@ -28,10 +28,10 @@ Status & URLs
   health               HTTP health-check each service
 
 Deploy & serve
-  apply [target]       kubectl apply  (jellyfin|platform|monitoring|llm|hermes|all)
+  apply [target]       kubectl apply  (jellyfin|platform|monitoring|llm|hermes|n8n|all)
   serve                (re)establish every tailnet proxy — Headlamp, Grafana, Flowers Admin,
                         Traefik dashboard, Open WebUI, Zot, Hermes dashboard, Hindsight UI,
-                        Prowlarr/Radarr/Sonarr, ContainerSSH, Wetty (13 bindings; `homelab urls`
+                        Prowlarr/Radarr/Sonarr, ContainerSSH, Wetty, n8n (14 bindings; `homelab urls`
                         for the full port list)
   restart <svc>        rollout restart a service
   logs <svc> [-f]      tail a service's logs
@@ -41,7 +41,7 @@ Node-join & debug
   debug [svc]          diagnostics bundle (+ describe/logs for <svc>)
 ```
 
-`svc` = `jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin | pgweb | vllm | open-webui | zot | hermes`
+`svc` = `jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin | pgweb | vllm | open-webui | zot | hermes | n8n`
 (ContainerSSH, Wetty, and the arr-stack apps aren't wired into `restart`/`logs`
 yet — use raw `kubectl` for those, e.g. `kubectl -n containerssh rollout restart deploy/wetty`.)
 
@@ -51,7 +51,8 @@ yet — use raw `kubectl` for those, e.g. `kubectl -n containerssh rollout resta
 `HOMELAB_GRAFANA_IP`, `HOMELAB_ADMIN_IP`, `HOMELAB_TRAEFIK_IP`,
 `HOMELAB_OPENWEBUI_IP`, `HOMELAB_ZOT_IP`, `HOMELAB_HERMES_DASH_IP`,
 `HOMELAB_HERMES_HINDSIGHT_UI_IP`, `HOMELAB_PROWLARR_IP`, `HOMELAB_RADARR_IP`,
-`HOMELAB_SONARR_IP`, `HOMELAB_CONTAINERSSH_IP`, `HOMELAB_WETTY_IP`.
+`HOMELAB_SONARR_IP`, `HOMELAB_CONTAINERSSH_IP`, `HOMELAB_WETTY_IP`,
+`HOMELAB_N8N_IP`.
 
 `pgweb-sync` requires `jq` (mirrors secret data between namespaces without decoding it).
 

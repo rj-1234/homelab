@@ -1,0 +1,93 @@
+---
+# n8n (https://n8n.io) — self-hosted workflow automation. Stock image, no
+# custom build needed (unlike Hermes Agent / ContainerSSH's auth-webhook —
+# Zot isn't involved here). Talks to its own Postgres (10-postgres.yaml)
+# instead of the bundled SQLite default — see README for why.
+#
+# Tailnet-only (same trust model as every other admin UI here): N8N_HOST /
+# WEBHOOK_URL point at the tailnet hostname so webhook URLs shown in the UI
+# are correct for tailnet-internal callers. No public route — n8n can't
+# receive a webhook call from an external SaaS (GitHub, Stripe, etc.) this
+# way; that's an accepted tradeoff, see README for the carve-out path if a
+# specific integration ever needs it.
+#
+# Host prep on cheeky-mini before first apply:
+#   sudo mkdir -p /srv/n8n/data && sudo chown 1000:1000 /srv/n8n/data
+#
+# Secrets, created out-of-band, NEVER committed:
+#   kubectl -n n8n create secret generic n8n-postgres \
+#     --from-literal=POSTGRES_USER=n8n \
+#     --from-literal=POSTGRES_PASSWORD=<pw> \
+#     --from-literal=POSTGRES_DB=n8n
+#   kubectl -n n8n create secret generic n8n-encryption-key \
+#     --from-literal=key="$(openssl rand -hex 32)"
+# The encryption key decrypts every stored credential — back it up
+# somewhere outside the cluster (e.g. alongside CREDENTIALS.md) and never
+# regenerate it on an existing install, or every saved credential becomes
+# unusable.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: n8n
+  namespace: n8n
+  labels: { app.kubernetes.io/name: n8n }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app.kubernetes.io/name: n8n } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: n8n } }
+    spec:
+      nodeSelector: { kubernetes.io/hostname: cheeky-mini }
+      # n8n's official image runs as the `node` user (uid/gid 1000) by
+      # default — match that on the hostPath dir instead of overriding it.
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: n8n
+          image: docker.io/n8nio/n8n:latest
+          env:
+            - { name: DB_TYPE, value: "postgresdb" }
+            - { name: DB_POSTGRESDB_HOST, value: "postgres" }
+            - { name: DB_POSTGRESDB_PORT, value: "5432" }
+            - name: DB_POSTGRESDB_DATABASE
+              valueFrom: { secretKeyRef: { name: n8n-postgres, key: POSTGRES_DB } }
+            - name: DB_POSTGRESDB_USER
+              valueFrom: { secretKeyRef: { name: n8n-postgres, key: POSTGRES_USER } }
+            - name: DB_POSTGRESDB_PASSWORD
+              valueFrom: { secretKeyRef: { name: n8n-postgres, key: POSTGRES_PASSWORD } }
+            - name: N8N_ENCRYPTION_KEY
+              valueFrom: { secretKeyRef: { name: n8n-encryption-key, key: key } }
+            - { name: N8N_PORT, value: "5678" }
+            - { name: N8N_PROTOCOL, value: "https" }
+            - { name: N8N_HOST, value: "cheeky-mini.tail2f4253.ts.net" }
+            - { name: WEBHOOK_URL, value: "https://cheeky-mini.tail2f4253.ts.net:8099/" }
+            - { name: GENERIC_TIMEZONE, value: "America/New_York" }
+            - { name: N8N_RUNNERS_ENABLED, value: "true" }
+          ports: [{ name: http, containerPort: 5678 }]
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 1Gi }
+          volumeMounts:
+            - { name: data, mountPath: /home/node/.n8n }
+      volumes:
+        - name: data
+          hostPath: { path: /srv/n8n/data, type: Directory }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: n8n
+  namespace: n8n
+  labels: { app.kubernetes.io/name: n8n }
+spec:
+  type: ClusterIP
+  clusterIP: 10.43.200.57
+  selector: { app.kubernetes.io/name: n8n }
+  ports: [{ name: http, port: 5678, targetPort: http }]

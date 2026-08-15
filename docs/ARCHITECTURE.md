@@ -67,12 +67,14 @@ flowchart TB
             qbit["qBittorrent :8080\n(media, via gluetun)"]
             cssh["ContainerSSH :2222\n(raw TCP, containerssh)"]
             wetty["Wetty :8098\n(containerssh)"]
+            n8n["n8n :8099\n(n8n)"]
         end
 
         subgraph internalsvc["Cluster-internal only — no tailnet or public path"]
             vllm["vLLM :8000\n(local-llm, on cheeky/GPU)"]
             pgdocs[("Postgres\ndocs")]
             pgflowers[("Postgres\nflowers")]
+            pgn8n[("Postgres\nn8n")]
             gluetun["gluetun\n(ProtonVPN netns for qBittorrent)"]
             guestpods["containerssh-guests\n(one throwaway pod/session)"]
         end
@@ -93,6 +95,8 @@ flowchart TB
     hermesdash --> vllm
     pgweb --> pgdocs
     pgweb --> pgflowers
+    pgweb --> pgn8n
+    n8n --> pgn8n
     qbit --> gluetun
     prowlarr --> radarr
     prowlarr --> sonarr
@@ -118,7 +122,7 @@ flowchart TB
   ContainerSSH's raw SSH port.
 - **Cluster-internal only:** vLLM is never tailnet or public exposed — Open
   WebUI and Hermes's gateway/dashboard are the only things that talk to it
-  directly, over its ClusterIP. Both Postgres instances are reached only by
+  directly, over its ClusterIP. Each Postgres instance is reached only by
   their owning app plus the shared `pgweb` browser. `containerssh-guests`
   pods have no Service at all — access is exclusively through the
   ContainerSSH/Wetty front doors, which proxy a session in and delete the
@@ -158,6 +162,7 @@ flowchart TB
         hermes["hermes: gateway + dashboard + hindsight-ui\n(3 containers, shared pod netns)"]
         owui["local-llm: Open WebUI\n(no GPU needed)"]
         cssh["containerssh + auth-webhook + wetty\n(pinned here — cheeky's Zot pull is broken)"]
+        n8n["n8n + postgres\n(no GPU needed)"]
 
         intelplugin -.->|advertises| jellyfin
         jellyfin --> igpu
@@ -166,6 +171,7 @@ flowchart TB
         zfsroot --- flowers
         zfsroot --- hermes
         zfsroot --- arr
+        zfsroot --- n8n
         usb --> jellyfin
         arr -->|"hardlink import\n/srv/data/media"| jellyfin
     end
@@ -193,7 +199,7 @@ flowchart TB
 | Pattern | Used by | Why |
 |---|---|---|
 | **`local-path` PVC** (k3s bundled provisioner, node-local dynamic) | Jellyfin config, qBittorrent config, Prometheus (20Gi/15d), Grafana (5Gi) | Fine for state that's regenerable or non-critical if lost; simplest option, no manual `mkdir`. |
-| **hostPath on a dedicated ZFS dataset** (`rpool/...`) | `/srv/docs` (Field Vault), `/srv/hermes/data`, `/srv/zot/registry`, `/srv/data` (arr + Jellyfin library), `/srv/openclaw/vllm-cache` (HF weights, on `cheeky`) | Stable, known path for anything worth backing up or too specific for a generic PVC (e.g. Postgres PGDATA, HF model cache). |
+| **hostPath on a dedicated ZFS dataset** (`rpool/...`) | `/srv/docs` (Field Vault), `/srv/hermes/data`, `/srv/zot/registry`, `/srv/data` (arr + Jellyfin library), `/srv/n8n/{data,pg}`, `/srv/openclaw/vllm-cache` (HF weights, on `cheeky`) | Stable, known path for anything worth backing up or too specific for a generic PVC (e.g. Postgres PGDATA, HF model cache). |
 | **hostPath on the read-only NTFS USB** | Jellyfin's `Movies`/`TvShows` source library | Physical media, not cluster-managed storage — mounted `HostToContainer` so the ntfs-3g FUSE mount is visible inside the pod, read-only so nothing in the cluster can touch the source files. |
 
 **GPU device plugins — both work the same way:** advertise a schedulable

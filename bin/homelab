@@ -24,6 +24,7 @@ RADARR_IP="${HOMELAB_RADARR_IP:-10.43.200.21}"         # pinned ClusterIP (Radar
 SONARR_IP="${HOMELAB_SONARR_IP:-10.43.200.22}"         # pinned ClusterIP (Sonarr, port 8989)
 CONTAINERSSH_IP="${HOMELAB_CONTAINERSSH_IP:-10.43.200.55}" # pinned ClusterIP (ContainerSSH, port 2222)
 WETTY_IP="${HOMELAB_WETTY_IP:-10.43.200.56}"           # pinned ClusterIP (Wetty web terminal, port 3000)
+N8N_IP="${HOMELAB_N8N_IP:-10.43.200.57}"               # pinned ClusterIP (n8n, port 5678)
 # repo root = parent of this script's dir
 REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 
@@ -50,6 +51,7 @@ svc_map() {
     open-webui) echo "local-llm open-webui" ;;
     zot)        echo "platform zot" ;;
     hermes)     echo "hermes hermes" ;;
+    n8n)        echo "n8n n8n" ;;
     *) return 1 ;;
   esac
 }
@@ -164,7 +166,8 @@ cmd_pgweb_sync() {  # mirror both Postgres secrets into platform for the shared 
   }
   _pgweb_mirror docs doccat-postgres doccat-postgres-mirror
   _pgweb_mirror flowers flowers-postgres flowers-postgres-mirror
-  info "mirrored doccat-postgres + flowers-postgres into platform for pgweb"
+  _pgweb_mirror n8n n8n-postgres n8n-postgres-mirror
+  info "mirrored doccat-postgres + flowers-postgres + n8n-postgres into platform for pgweb"
 }
 cmd_check_secrets() {
   need kubectl; local ok=0
@@ -216,6 +219,7 @@ Private (Tailscale):
   Sonarr        https://$TAILNET_HOST:8989
   ContainerSSH  ssh -p 2222 anyuser@$TAILNET_HOST
   Wetty         https://$TAILNET_HOST:8098
+  n8n           https://$TAILNET_HOST:8099
 
 LAN:
   Jellyfin      http://$(server_ip):8096
@@ -235,6 +239,7 @@ cmd_health() {
     [zot]="http://$ZOT_IP:5000/v2/"
     [hermes-dash]="http://$HERMES_DASH_IP:9119/"
     [hindsight-ui]="http://$HERMES_HINDSIGHT_UI_IP:8890/api/health"
+    [n8n]="http://$N8N_IP:5678/healthz"
   )
   for name in "${!t[@]}"; do
     code=$(k -n platform run hl-health-$$-"$name" --rm -i --restart=Never -q \
@@ -259,8 +264,9 @@ cmd_apply() {
     llm)        k apply -k "$REPO/platform/nvidia-gpu-plugin/"
                 k apply -k "$REPO/local-llm/kubernetes/" ;;
     hermes)     k apply -k "$REPO/hermes/kubernetes/" ;;
-    all)        cmd_apply jellyfin; cmd_apply platform; cmd_apply monitoring; cmd_apply llm; cmd_apply hermes ;;
-    *) die "unknown target: $1 (jellyfin|platform|monitoring|llm|hermes|all)" ;;
+    n8n)        k apply -k "$REPO/n8n/kubernetes/" ;;
+    all)        cmd_apply jellyfin; cmd_apply platform; cmd_apply monitoring; cmd_apply llm; cmd_apply hermes; cmd_apply n8n ;;
+    *) die "unknown target: $1 (jellyfin|platform|monitoring|llm|hermes|n8n|all)" ;;
   esac
 }
 cmd_serve() {  # idempotent tailnet exposure for admin UIs
@@ -278,7 +284,8 @@ cmd_serve() {  # idempotent tailnet exposure for admin UIs
   sudo tailscale serve --bg --https=8989 "http://$SONARR_IP:8989"
   sudo tailscale serve --bg --tcp=2222 "tcp://$CONTAINERSSH_IP:2222"
   sudo tailscale serve --bg --https=8098 "http://$WETTY_IP:3000"
-  info "serving Headlamp :443 + Grafana :$GRAFANA_TS_PORT + Flowers Admin :8092 + Traefik :8444 + Open WebUI :8094 + Zot :8095 + Hermes dashboard :8096 + Hindsight UI :8097 + Prowlarr :9696 + Radarr :7878 + Sonarr :8989 + ContainerSSH :2222 + Wetty :8098 on $TAILNET_HOST"
+  sudo tailscale serve --bg --https=8099 "http://$N8N_IP:5678"
+  info "serving Headlamp :443 + Grafana :$GRAFANA_TS_PORT + Flowers Admin :8092 + Traefik :8444 + Open WebUI :8094 + Zot :8095 + Hermes dashboard :8096 + Hindsight UI :8097 + Prowlarr :9696 + Radarr :7878 + Sonarr :8989 + ContainerSSH :2222 + Wetty :8098 + n8n :8099 on $TAILNET_HOST"
   sudo tailscale serve status
 }
 cmd_restart() {
@@ -349,10 +356,10 @@ Status & URLs:
   health               HTTP health check each service
 
 Deploy & serve:
-  apply [target]       kubectl apply  (jellyfin|platform|monitoring|llm|hermes|all)
+  apply [target]       kubectl apply  (jellyfin|platform|monitoring|llm|hermes|n8n|all)
   serve                (re)establish every tailnet proxy: Headlamp, Grafana, Flowers Admin,
                         Traefik dashboard, Open WebUI, Zot, Hermes dashboard, Hindsight UI,
-                        Prowlarr/Radarr/Sonarr, ContainerSSH, Wetty — see 'homelab urls' for ports
+                        Prowlarr/Radarr/Sonarr, ContainerSSH, Wetty, n8n — see 'homelab urls' for ports
   restart <svc>        rollout restart a service
   logs <svc> [-f]      tail a service's logs
 
@@ -360,7 +367,7 @@ Node-join & debug:
   join-cmd             print the agent-node join one-liner
   debug [svc]          diagnostics bundle (+ describe/logs for <svc>)
 
-svc = jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin | pgweb | vllm | open-webui | zot | hermes
+svc = jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin | pgweb | vllm | open-webui | zot | hermes | n8n
 (ContainerSSH/Wetty/arr-stack apps aren't in svc_map yet — restart/logs need raw kubectl for those)
 Config via env: HOMELAB_DOMAIN, HOMELAB_TAILNET_HOST, KUBECONFIG, ...
 EOF

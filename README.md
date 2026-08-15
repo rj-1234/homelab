@@ -3,11 +3,11 @@
 Single-node **k3s** homelab running a Jellyfin media server, a personal
 **document + field vault** ([doc-catalog](doc-catalog/README.md)), a
 **digital flower gift** app ([flower-delivery](flower-delivery/)), download
-automation ([arr/](arr/kubernetes/README.md)), a metrics stack (Grafana +
-Prometheus), and a small platform stack (dashboard, service hub, secure
-remote access). Built to grow: adding agent nodes later is a one-liner, and
-workloads that must stay on this box are already pinned with node
-labels/affinity.
+automation ([arr/](arr/kubernetes/README.md)), workflow automation
+([n8n](n8n/README.md)), a metrics stack (Grafana + Prometheus), and a small
+platform stack (dashboard, service hub, secure remote access). Built to
+grow: adding agent nodes later is a one-liner, and workloads that must stay
+on this box are already pinned with node labels/affinity.
 
 > **Resilience honesty:** one node = **pod self-healing only**. k3s restarts
 > crashed pods; it does **not** survive the machine dying. True HA needs 3+
@@ -130,7 +130,7 @@ flowchart TB
   **Flowers Admin**, **Grafana**, **pgweb**, **Traefik dashboard**,
   **Open WebUI**, **Zot registry**, **Hermes dashboard**, **Hindsight UI**,
   **Prowlarr/Radarr/Sonarr/qBittorrent**, **ContainerSSH** (raw TCP) +
-  **Wetty** (browser terminal). Full port list: `homelab urls`. None of
+  **Wetty** (browser terminal), **n8n**. Full port list: `homelab urls`. None of
   these are ever public — the vLLM inference endpoint itself isn't even
   tailnet-exposed, it's cluster-internal only (Open WebUI and Hermes are the
   only things that talk to it directly).
@@ -165,6 +165,7 @@ files; `*.example.yaml` templates are the only committed config stand-ins.
 | **Zot** | `platform` | tailnet-only (`:8095`) | Self-hosted OCI registry, no auth (push/pull trust matches vLLM's — plain HTTP, allowlisted as insecure on both nodes' containerd + `cheeky`'s Docker daemon). Backs custom image builds (Hermes Agent, ContainerSSH's auth-webhook) so they don't depend on a public registry. hostPath storage on `cheeky` (`/srv/zot/registry`). |
 | **Hermes Agent** | `hermes` | tailnet-only (dashboard `:8096`, Hindsight UI `:8097`) | Agent orchestrator on top of vLLM, WhatsApp as the primary channel — [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), MIT. Built from a pinned release tag + one local patch, pushed to Zot (no upstream image published). Runs on `cheeky-mini` (no GPU needed) as three containers sharing the pod's network namespace: `gateway` (outbound-only, no inbound port), `dashboard` (holds API keys, upstream defaults it to loopback-only but we bind `0.0.0.0` and put it behind tailnet `serve` instead), `hindsight-ui` (Hindsight's memory-provider control-plane UI). hostPath data on `cheeky-mini` (`/srv/hermes/data`). Own docs: [hermes/](hermes/README.md). |
 | **ContainerSSH + Wetty** | `containerssh` | tailnet-only (`:2222` raw TCP + `:8098` browser) | On-demand, isolated SSH — a fresh Pod per connection in `containerssh-guests`, deleted on disconnect. Two front-ends, same backend: native `ssh -p 2222` (pubkey) or **Wetty** (browser terminal, password). Auth via a tiny self-hosted webhook (no external OAuth dep), built + pushed to Zot. RBAC scoped to pod create/exec/delete in the guest namespace only. See [containerssh/kubernetes/](containerssh/kubernetes/README.md). |
+| **n8n** | `n8n` | tailnet-only (`:8099`) | Self-hosted workflow automation ([n8n.io](https://n8n.io)), stock image, own dedicated Postgres (hostPath on ZFS, same pattern as doc-catalog/flowers) rather than n8n's bundled SQLite. Tailnet-only means it can't receive webhooks from external SaaS (GitHub, Stripe, etc.) — schedule/manual/internal-caller triggers work fine; a public webhook path is a deliberate future carve-out, not set up by default. `N8N_ENCRYPTION_KEY` Secret decrypts every stored credential — back it up. Own docs: [n8n/](n8n/README.md). |
 
 ---
 
@@ -177,7 +178,7 @@ platform/
   00-namespace.yaml        platform namespace
   headlamp/                Headlamp Deployment/Service + admin RBAC
   homepage/                Homepage Deployment/Service + config ConfigMap + discovery RBAC
-  pgweb/                   Shared read-only Postgres browser (both apps' DBs) + bookmarks ConfigMap
+  pgweb/                   Shared read-only Postgres browser (every app's DB) + bookmarks ConfigMap
   traefik/                 Traefik dashboard Service + HelmChartConfig (dashboard only, not used as ingress)
   monitoring/              Grafana + Prometheus (kube-prometheus-stack Helm values) — own README
   intel-gpu-plugin/        Intel GPU device plugin (remote kustomize base) — advertises gpu.intel.com/i915 for Jellyfin
@@ -187,6 +188,7 @@ hermes/                    Hermes Agent (on cheeky-mini) — own README, kuberne
 local-llm/                 vLLM (on cheeky) + Open WebUI — own README, kubernetes/ has namespace/Deployments/Services
 containerssh/               On-demand isolated SSH shells, native + Wetty browser terminal — own README,
                             kubernetes/ has namespace/RBAC/Deployments, auth-webhook/ is the source for its custom image
+n8n/                       Workflow automation — own README, kubernetes/ has namespace/Postgres/Deployment
 cloudflare-tunnel/
   kubernetes/              cloudflared Deployment + values.example.yaml (token via Secret)
   Readme.md                tunnel setup + dashboard routing
@@ -249,9 +251,10 @@ SSH, and configure Cloudflare public hostnames + Access
 Each other app has its own deploy steps in its own README — doc-catalog
 ([doc-catalog/README.md](doc-catalog/README.md)), flower-delivery
 ([flower-delivery/README.md](flower-delivery/README.md)), the arr stack
-([arr/kubernetes/README.md](arr/kubernetes/README.md)), and ContainerSSH
-([containerssh/kubernetes/README.md](containerssh/kubernetes/README.md)).
-Monitoring (`platform/monitoring/`) is Helm-managed — see its own
+([arr/kubernetes/README.md](arr/kubernetes/README.md)), ContainerSSH
+([containerssh/kubernetes/README.md](containerssh/kubernetes/README.md)), and
+n8n ([n8n/README.md](n8n/README.md), `homelab apply n8n`). Monitoring
+(`platform/monitoring/`) is Helm-managed — see its own
 [README.md](platform/monitoring/README.md).
 
 ## Operate
