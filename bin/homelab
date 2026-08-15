@@ -94,6 +94,7 @@ cmd_creds() {  # gather every service credential into a gitignored CREDENTIALS.m
   local grafana_pw headlamp_tok qbit_pw cf_tok
   local doccat_pg_user doccat_pg_pw doccat_pg_db
   local flowers_pg_user flowers_pg_pw flowers_pg_db
+  local n8n_pg_user n8n_pg_pw n8n_pg_db n8n_enc_key
   local anthropic_key gmail_secret vpn_key
 
   grafana_pw="$(cmd_grafana_pw 2>/dev/null || echo '(unavailable)')"
@@ -110,6 +111,12 @@ cmd_creds() {  # gather every service credential into a gitignored CREDENTIALS.m
   flowers_pg_user="$(k -n flowers get secret flowers-postgres -o jsonpath='{.data.POSTGRES_USER}' 2>/dev/null | base64 -d)"
   flowers_pg_pw="$(k -n flowers get secret flowers-postgres -o jsonpath='{.data.POSTGRES_PASSWORD}' 2>/dev/null | base64 -d)"
   flowers_pg_db="$(k -n flowers get secret flowers-postgres -o jsonpath='{.data.POSTGRES_DB}' 2>/dev/null | base64 -d)"
+
+  n8n_pg_user="$(k -n n8n get secret n8n-postgres -o jsonpath='{.data.POSTGRES_USER}' 2>/dev/null | base64 -d)"
+  n8n_pg_pw="$(k -n n8n get secret n8n-postgres -o jsonpath='{.data.POSTGRES_PASSWORD}' 2>/dev/null | base64 -d)"
+  n8n_pg_db="$(k -n n8n get secret n8n-postgres -o jsonpath='{.data.POSTGRES_DB}' 2>/dev/null | base64 -d)"
+  n8n_enc_key="$(k -n n8n get secret n8n-encryption-key -o jsonpath='{.data.key}' 2>/dev/null | base64 -d)"
+  [ -n "$n8n_enc_key" ] || n8n_enc_key="(unavailable)"
 
   anthropic_key="$(k -n docs get secret doccat-anthropic -o jsonpath='{.data.ANTHROPIC_API_KEY}' 2>/dev/null | base64 -d)"
   [ -n "$anthropic_key" ] || anthropic_key="(not set — Claude OCR escalation disabled)"
@@ -135,6 +142,7 @@ cmd_creds() {  # gather every service credential into a gitignored CREDENTIALS.m
     echo "| Jellyfin | https://jellyfin.$DOMAIN | (self-managed) | set during Jellyfin's own setup wizard — not in a k8s Secret |"
     echo "| pgweb | (local-only) | — | no auth; \`kubectl -n docs port-forward svc/pgweb 8081:8081\` |"
     echo "| Flowers / Flowers Admin | https://flowers.$DOMAIN / :8092 | — | no login; network-gated only (Flowers Admin is tailnet-only) |"
+    echo "| n8n | https://$TAILNET_HOST:8099 | (self-managed) | set during n8n's owner-account setup wizard — not in a k8s Secret |"
     echo
     echo "## Databases"
     echo
@@ -142,6 +150,7 @@ cmd_creds() {  # gather every service credential into a gitignored CREDENTIALS.m
     echo "|---|---|---|---|---|"
     echo "| docs (doc-catalog) | postgres.docs.svc.cluster.local:5432 | $doccat_pg_user | $doccat_pg_pw | $doccat_pg_db |"
     echo "| flowers | postgres.flowers.svc.cluster.local:5432 | $flowers_pg_user | $flowers_pg_pw | $flowers_pg_db |"
+    echo "| n8n | postgres.n8n.svc.cluster.local:5432 | $n8n_pg_user | $n8n_pg_pw | $n8n_pg_db |"
     echo
     echo "## API keys / OAuth / VPN (not logins — pipeline credentials)"
     echo
@@ -151,6 +160,7 @@ cmd_creds() {  # gather every service credential into a gitignored CREDENTIALS.m
     echo "| doc-catalog Anthropic key | $anthropic_key | secret: docs/doccat-anthropic |"
     echo "| doc-catalog Gmail OAuth | $gmail_secret | secret: docs/doccat-gmail (per-account token-<label>.json) |"
     echo "| gluetun ProtonVPN key | $vpn_key | secret: media/gluetun-vpn |"
+    echo "| n8n encryption key | $n8n_enc_key | secret: n8n/n8n-encryption-key — decrypts every stored n8n credential, **never rotate on an existing install** |"
   } > "$out"
   info "wrote $out"
 }

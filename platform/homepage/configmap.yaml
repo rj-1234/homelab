@@ -142,6 +142,12 @@ data:
             icon: wetty.png
             namespace: containerssh
             app: wetty
+        - n8n:
+            href: https://cheeky-mini.tail2f4253.ts.net:8099
+            description: Workflow automation · tailnet-only
+            icon: n8n.png
+            namespace: n8n
+            app: n8n
     - Infra:
         - Headlamp:
             href: https://cheeky-mini.tail2f4253.ts.net
@@ -186,7 +192,7 @@ data:
     - Platform:
         - Open WebUI:
             href: https://cheeky-mini.tail2f4253.ts.net:8094
-            description: Chat UI onto vLLM (Qwen2.5-7B) · tailnet-only
+            description: Chat UI onto vLLM (Llama-3.2-3B) · tailnet-only
             icon: open-webui.png
             namespace: local-llm
             app: open-webui
