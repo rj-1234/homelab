@@ -28,8 +28,11 @@ Status & URLs
   health               HTTP health-check each service
 
 Deploy & serve
-  apply [target]       kubectl apply  (jellyfin|platform|monitoring|all)
-  serve                (re)establish tailscale serve: Headlamp :443, Grafana :8443, Flowers Admin :8092
+  apply [target]       kubectl apply  (jellyfin|platform|monitoring|llm|hermes|all)
+  serve                (re)establish every tailnet proxy — Headlamp, Grafana, Flowers Admin,
+                        Traefik dashboard, Open WebUI, Zot, Hermes dashboard, Hindsight UI,
+                        Prowlarr/Radarr/Sonarr, ContainerSSH, Wetty (13 bindings; `homelab urls`
+                        for the full port list)
   restart <svc>        rollout restart a service
   logs <svc> [-f]      tail a service's logs
 
@@ -38,12 +41,17 @@ Node-join & debug
   debug [svc]          diagnostics bundle (+ describe/logs for <svc>)
 ```
 
-`svc` = `jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin | pgweb`
+`svc` = `jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin | pgweb | vllm | open-webui | zot | hermes`
+(ContainerSSH, Wetty, and the arr-stack apps aren't wired into `restart`/`logs`
+yet — use raw `kubectl` for those, e.g. `kubectl -n containerssh rollout restart deploy/wetty`.)
 
 ## Config (env overrides)
 `KUBECONFIG` (default `/etc/rancher/k3s/k3s.yaml`), `HOMELAB_DOMAIN`,
 `HOMELAB_TAILNET_HOST`, `HOMELAB_GRAFANA_TS_PORT`, `HOMELAB_HEADLAMP_IP`,
-`HOMELAB_GRAFANA_IP`, `HOMELAB_ADMIN_IP`.
+`HOMELAB_GRAFANA_IP`, `HOMELAB_ADMIN_IP`, `HOMELAB_TRAEFIK_IP`,
+`HOMELAB_OPENWEBUI_IP`, `HOMELAB_ZOT_IP`, `HOMELAB_HERMES_DASH_IP`,
+`HOMELAB_HERMES_HINDSIGHT_UI_IP`, `HOMELAB_PROWLARR_IP`, `HOMELAB_RADARR_IP`,
+`HOMELAB_SONARR_IP`, `HOMELAB_CONTAINERSSH_IP`, `HOMELAB_WETTY_IP`.
 
 `pgweb-sync` requires `jq` (mirrors secret data between namespaces without decoding it).
 

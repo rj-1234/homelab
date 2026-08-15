@@ -26,10 +26,30 @@ spec:
             nodeSelectorTerms:
               - matchExpressions:
                   - { key: homelab/media-store, operator: In, values: ["seagate"] }
-      # NOTE: VPN (gluetun) removed for now — torrent traffic uses the node's
-      # real IP. Re-add the gluetun sidecar (see git history / arr README) once
-      # a paid P2P VPN key is available, or switch to Usenet.
       containers:
+        # --- gluetun: VPN gateway. Both containers share the pod network ns,
+        #     so qBittorrent's traffic is forced through the tunnel; if the VPN
+        #     drops, gluetun's kill-switch blocks all egress. ---
+        - name: gluetun
+          image: qmcgaw/gluetun:latest
+          securityContext:
+            capabilities: { add: [NET_ADMIN] }
+          envFrom:
+            - secretRef: { name: gluetun-vpn }   # VPN_SERVICE_PROVIDER, VPN_TYPE, WIREGUARD_PRIVATE_KEY
+          env:
+            - { name: TZ, value: "America/New_York" }
+            # Allow the cluster to reach the qBittorrent UI + let pods/k8s API talk back.
+            - { name: FIREWALL_INPUT_PORTS, value: "8080" }
+            - { name: FIREWALL_OUTBOUND_SUBNETS, value: "10.42.0.0/16,10.43.0.0/16" }
+            - { name: VPN_PORT_FORWARDING, value: "on" }   # ProtonVPN supports NAT-PMP
+          ports:
+            - { name: http, containerPort: 8080 }
+          volumeMounts:
+            - { name: tun, mountPath: /dev/net/tun }
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits:   { memory: 256Mi }
+        # --- qBittorrent: no network config of its own; rides gluetun's ns ---
         - name: qbittorrent
           image: lscr.io/linuxserver/qbittorrent:latest
           env:
@@ -39,7 +59,6 @@ spec:
             - { name: WEBUI_PORT, value: "8080" }
             - { name: TORRENTING_PORT, value: "6881" }
           ports:
-            - { name: http,    containerPort: 8080 }
             - { name: bt-tcp,  containerPort: 6881, protocol: TCP }
             - { name: bt-udp,  containerPort: 6881, protocol: UDP }
           volumeMounts:
@@ -52,6 +71,8 @@ spec:
         - { name: config, persistentVolumeClaim: { claimName: qbittorrent-config } }
         - name: data
           hostPath: { path: /srv/data, type: Directory }
+        - name: tun
+          hostPath: { path: /dev/net/tun, type: CharDevice }
 ---
 apiVersion: v1
 kind: Service

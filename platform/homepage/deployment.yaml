@@ -17,6 +17,10 @@ spec:
         app.kubernetes.io/name: homepage
     spec:
       serviceAccountName: homepage
+      # Background image hostPath only exists on cheeky-mini (no shared
+      # storage) — pin here or the pod lands on cheeky and fails to mount it.
+      nodeSelector:
+        kubernetes.io/hostname: cheeky-mini
       # Homepage writes into /app/config on boot (custom.css/js skeleton), so it
       # can't be a read-only ConfigMap mount. Seed the ConfigMap into a writable
       # emptyDir once, then let Homepage own the dir.

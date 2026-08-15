@@ -26,13 +26,18 @@ labels/affinity.
 | OS | Ubuntu 24.04 desktop (also a daily debugging machine — changes kept reversible) |
 | Kubernetes | k3s v1.36, `--snapshotter=native` (required on ZFS), ServiceLB/klipper + Traefik (bundled ingress) both kept |
 | Host | `cheeky` (agent), Intel i5-12600K (10c/16t), 31 GB RAM |
-| GPU | NVIDIA RTX 3080 — labeled `homelab/gpu=rtx3080`, targeted by the vLLM Deployment in `openclaw/kubernetes/`; needs host-level NVIDIA driver + `nvidia-container-toolkit` before it'll actually schedule |
+| GPU | NVIDIA RTX 3080 — labeled `homelab/gpu=rtx3080`, targeted by the vLLM Deployment in `local-llm/kubernetes/`; needs host-level NVIDIA driver + `nvidia-container-toolkit` before it'll actually schedule |
 | Disk | 478 GB NVMe (root) |
 | OS | Pop!_OS 22.04 desktop (dual-boot with Windows) |
 
 ---
 
 ## Architecture
+
+At a glance — see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the
+full picture: every tailnet-only service (not just the ones below), node/GPU
+placement, the three storage patterns in play, and the arr-stack data-flow
+diagram.
 
 ```mermaid
 flowchart TB
@@ -60,23 +65,26 @@ flowchart TB
             pgweb[pgweb - shared DB browser, :8081]
         end
         subgraph docs [namespace: docs]
-            vault[Field Vault - SvelteKit + Postgres]
+            vault[Field Vault - React + Postgres]
         end
         subgraph flowers [namespace: flowers]
             flow[Flowers - React + FastAPI + Postgres]
         end
+        subgraph hermesns [namespace: hermes]
+            herm[Hermes dashboard :9119 + Hindsight UI :8890]
+        end
         subgraph monitoring [namespace: monitoring]
             graf[Grafana + Prometheus]
         end
-        subgraph openclaw [namespace: openclaw]
+        subgraph localllm [namespace: local-llm]
             owui[Open WebUI :8080]
         end
         usb[(USB NTFS media - read-only)]
-        zfs[(rpool ZFS - local-path PVCs)]
+        zfs[(rpool ZFS - local-path PVCs + hostPath datasets)]
     end
 
     subgraph node2 [cheeky - k3s agent, labeled homelab/gpu=rtx3080]
-        vllm[vLLM :8000 - Qwen2.5-7B-Instruct-AWQ, namespace: openclaw]
+        vllm[vLLM :8000 - Llama-3.2-3B-Instruct-AWQ, namespace: local-llm]
         gpu[(NVIDIA RTX 3080)]
     end
 
@@ -94,8 +102,10 @@ flowchart TB
     ts -->|Grafana https :8443| graf
     ts -->|qBittorrent https :8080| qbit
     ts -->|Flowers Admin https :8092| flow
+    ts -->|Hermes dash + Hindsight UI| herm
     ts -->|Open WebUI https :8094| owui
     ts -.-> jelly
+    herm --> vllm
     owui --> vllm
     vllm --> gpu
     vault --> zfs
@@ -116,13 +126,18 @@ flowchart TB
 - **Private (Tailscale host install):** the node joins the tailnet
   (`tail2f4253.ts.net`). Gives Tailscale SSH into the box and tailnet-only
   access to admin services, each on a pinned ClusterIP + `tailscale serve`
-  port so the binding survives redeploys: **Headlamp** (`:443`), **Field
-  Vault** (`:8091`), **Flowers Admin** (`:8092`), **Grafana** (`:8443`),
-  **qBittorrent** (`:8080`), **pgweb** (`:8081`, shared DB browser for both
-  Postgres instances), **Open WebUI** (`:8094`). None of these are ever
-  public — the vLLM inference endpoint itself isn't even tailnet-exposed,
-  it's cluster-internal only (Open WebUI is the only thing that talks to it
-  directly).
+  port so the binding survives redeploys — **Headlamp**, **Field Vault**,
+  **Flowers Admin**, **Grafana**, **pgweb**, **Traefik dashboard**,
+  **Open WebUI**, **Zot registry**, **Hermes dashboard**, **Hindsight UI**,
+  **Prowlarr/Radarr/Sonarr/qBittorrent**, **ContainerSSH** (raw TCP) +
+  **Wetty** (browser terminal). Full port list: `homelab urls`. None of
+  these are ever public — the vLLM inference endpoint itself isn't even
+  tailnet-exposed, it's cluster-internal only (Open WebUI and Hermes are the
+  only things that talk to it directly).
+- **Traefik** is k3s-bundled and left enabled, but isn't used as an ingress
+  for any app today — only its dashboard is wired up (tailnet-only, same as
+  everything else above). See
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#1-access-layer) for why.
 
 ### Secrets
 No secrets in the repo. The Cloudflare connector token lives in a k8s Secret
@@ -141,37 +156,46 @@ files; `*.example.yaml` templates are the only committed config stand-ins.
 | **cloudflared** | `platform` | — (outbound only) | 2 replicas for HA. Token from the `cloudflared-token` Secret; remotely-managed tunnel (routing in the CF dashboard). |
 | **pgweb** | `platform` | tailnet-only (`:8081`) | Shared read-only Postgres browser for *both* apps' DBs (doc-catalog + flowers) via pgweb's bookmark picker (`--bookmarks-only`) instead of one instance per app — each bookmark's DB credentials come from a namespace-mirrored copy of that app's Postgres Secret (`homelab pgweb-sync`). ClusterIP pinned `10.43.103.110`. |
 | **Grafana + Prometheus** | `monitoring` | tailnet-only (`:8443`) | `kube-prometheus-stack` Helm chart — cluster/pod CPU+memory dashboards (kube-state-metrics, node-exporter), Grafana admin password in the `grafana-admin` Secret (`homelab grafana-pw`). Alertmanager off (dashboards-only, saves RAM). |
-| **Field Vault** (doc-catalog) | `docs` | tailnet-only (`tailscale serve :8091`) | Personal document + PII vault. Postgres-only pipeline (ingest → OCR → embed → tag → PII extract), FTS + pgvector hybrid search, Gmail ingest, Presidio field extraction. SvelteKit UI, realtime via SSE. All models on-node, **no public egress**. Own docs + manifests: [doc-catalog/](doc-catalog/README.md). |
+| **Traefik dashboard** | `kube-system` | tailnet-only (`:8444`) | k3s-bundled Traefik, left enabled but **not used as an ingress for any app** — no IngressRoutes exist. Only its dashboard/API is wired up, over a pinned Service (`10.43.200.40`) so `tailscale serve`'s target survives pod restarts. Kept `ClusterIP` rather than the chart's default `LoadBalancer` — klipper's non-interface-scoped iptables DNAT on `:443` was hijacking Tailscale's own `:443` binding for Headlamp. |
+| **Field Vault** (doc-catalog) | `docs` | tailnet-only (`tailscale serve :8091`) | Personal document + PII vault. Postgres-only pipeline (ingest → OCR → embed → tag → PII extract), FTS + pgvector hybrid search, Gmail ingest, Presidio field extraction. React + Vite + TS + Tailwind + shadcn/ui frontend, realtime via SSE. All models on-node, **no public egress**. Own docs + manifests: [doc-catalog/](doc-catalog/README.md). |
 | **Flowers** (flower-delivery) | `flowers` | `flowers.ch33ky.org` (public) | Digital flower gift app. Public compose page (pick up to 5-13 stems from 7 species, pin notes, write a message, choose how long the link stays open); `/g/:id` replays a 60s procedural-SVG bloom→wilt→petal-fall cycle while the link is alive, then permanently shows a pressed-flower keepsake. React + TS frontend, FastAPI + Postgres backend. Read-only admin list of every gift sent lives at **Flowers Admin** (same `flowers` namespace, tailnet-only `:8092`). Own code: [flower-delivery/](flower-delivery/). |
-| **qBittorrent** (arr stack) | `media` | tailnet-only (`:8080`) | Standalone torrent client behind a gluetun VPN kill-switch — manual downloads, no indexer/auto-organize automation (Radarr/Sonarr/Prowlarr were dropped as unneeded). See [arr/kubernetes/README.md](arr/kubernetes/README.md). |
-| **vLLM** | `openclaw` | cluster-internal only | Self-hosted OpenAI-compatible inference endpoint on `cheeky`'s RTX 3080, `nvidia.com/gpu: 1`. Model/quant/context-length/tool-parser are env vars (default `Qwen/Qwen2.5-7B-Instruct-AWQ`, AWQ 4-bit) so swapping models is a rollout restart, not a manifest edit. HF weights cached on a `cheeky` hostPath. Auth via `vllm-api-key` Secret. |
-| **Open WebUI** | `openclaw` | tailnet-only (`:8094`) | Chat frontend straight onto the vLLM endpoint, for model testing/debugging. |
-| **Zot** | `platform` | tailnet-only (`:8095`) | Self-hosted OCI registry, no auth (cluster-internal push/pull only — trust matches vLLM's). Backs custom image builds (Hermes Agent and future ones) so they don't depend on a public registry. Plain HTTP: containerd + the Docker daemon on `cheeky` both need it allowlisted as insecure. hostPath storage on `cheeky` (`/srv/zot/registry`). |
+| **qBittorrent + Prowlarr/Radarr/Sonarr** (arr stack) | `media` | tailnet-only (`:8080`/`:9696`/`:7878`/`:8989`) | Full download automation — Prowlarr aggregates indexer search, Radarr/Sonarr auto-fetch via qBittorrent (behind a gluetun VPN kill-switch) and import straight into the Jellyfin library path. See [arr/kubernetes/README.md](arr/kubernetes/README.md) and the [data-flow diagram](docs/ARCHITECTURE.md#3-arr-stack-data-flow). |
+| **vLLM** | `local-llm` | cluster-internal only | Self-hosted OpenAI-compatible inference endpoint on `cheeky`'s RTX 3080, `nvidia.com/gpu: 1`. Model/quant/context-length/tool-parser are env vars (currently `casperhansen/llama-3.2-3b-instruct-awq`, AWQ 4-bit, native 65536 context, fp8 KV-cache) so swapping models is a rollout restart, not a manifest edit. HF weights cached on a `cheeky` hostPath. Auth via `vllm-api-key` Secret. Own docs: [local-llm/](local-llm/README.md). |
+| **Open WebUI** | `local-llm` | tailnet-only (`:8094`) | Chat frontend straight onto the vLLM endpoint, for model testing/debugging. Own docs: [local-llm/](local-llm/README.md). |
+| **Zot** | `platform` | tailnet-only (`:8095`) | Self-hosted OCI registry, no auth (push/pull trust matches vLLM's — plain HTTP, allowlisted as insecure on both nodes' containerd + `cheeky`'s Docker daemon). Backs custom image builds (Hermes Agent, ContainerSSH's auth-webhook) so they don't depend on a public registry. hostPath storage on `cheeky` (`/srv/zot/registry`). |
+| **Hermes Agent** | `hermes` | tailnet-only (dashboard `:8096`, Hindsight UI `:8097`) | Agent orchestrator on top of vLLM, WhatsApp as the primary channel — [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), MIT. Built from a pinned release tag + one local patch, pushed to Zot (no upstream image published). Runs on `cheeky-mini` (no GPU needed) as three containers sharing the pod's network namespace: `gateway` (outbound-only, no inbound port), `dashboard` (holds API keys, upstream defaults it to loopback-only but we bind `0.0.0.0` and put it behind tailnet `serve` instead), `hindsight-ui` (Hindsight's memory-provider control-plane UI). hostPath data on `cheeky-mini` (`/srv/hermes/data`). Own docs: [hermes/](hermes/README.md). |
+| **ContainerSSH + Wetty** | `containerssh` | tailnet-only (`:2222` raw TCP + `:8098` browser) | On-demand, isolated SSH — a fresh Pod per connection in `containerssh-guests`, deleted on disconnect. Two front-ends, same backend: native `ssh -p 2222` (pubkey) or **Wetty** (browser terminal, password). Auth via a tiny self-hosted webhook (no external OAuth dep), built + pushed to Zot. RBAC scoped to pod create/exec/delete in the guest namespace only. See [containerssh/kubernetes/](containerssh/kubernetes/README.md). |
 
 ---
 
 ## Repo layout
 
 ```
-jellyfin/kubernetes/       Jellyfin: namespace, config PVC, Deployment, Service, kustomization
+docs/ARCHITECTURE.md       Detailed diagrams: access layer, node/hardware placement, arr-stack data flow
+jellyfin/kubernetes/       Jellyfin: namespace, config PVC, Deployment, Service, kustomization — own README
 platform/
   00-namespace.yaml        platform namespace
   headlamp/                Headlamp Deployment/Service + admin RBAC
   homepage/                Homepage Deployment/Service + config ConfigMap + discovery RBAC
   pgweb/                   Shared read-only Postgres browser (both apps' DBs) + bookmarks ConfigMap
-  monitoring/              Grafana + Prometheus (kube-prometheus-stack Helm values)
-  nvidia-gpu-plugin/       NVIDIA k8s device plugin (remote kustomize base, pinned to cheeky)
+  traefik/                 Traefik dashboard Service + HelmChartConfig (dashboard only, not used as ingress)
+  monitoring/              Grafana + Prometheus (kube-prometheus-stack Helm values) — own README
+  intel-gpu-plugin/        Intel GPU device plugin (remote kustomize base) — advertises gpu.intel.com/i915 for Jellyfin
+  nvidia-gpu-plugin/       NVIDIA k8s device plugin (remote kustomize base, pinned to cheeky) — advertises nvidia.com/gpu for vLLM
   zot/                     Self-hosted OCI registry — no public registry dependency for custom builds
+hermes/                    Hermes Agent (on cheeky-mini) — own README, kubernetes/ has namespace/ConfigMap/Deployment
+local-llm/                 vLLM (on cheeky) + Open WebUI — own README, kubernetes/ has namespace/Deployments/Services
+containerssh/               On-demand isolated SSH shells, native + Wetty browser terminal — own README,
+                            kubernetes/ has namespace/RBAC/Deployments, auth-webhook/ is the source for its custom image
 cloudflare-tunnel/
   kubernetes/              cloudflared Deployment + values.example.yaml (token via Secret)
   Readme.md                tunnel setup + dashboard routing
 tailscale/README.md        host install + `tailscale serve` for tailnet-only admin UIs
 doc-catalog/               Personal document + field vault — own README, k8s in
-                           kubernetes/, Python pipeline in src/, SvelteKit web/
+                           kubernetes/, Python pipeline in src/, React+Vite+TS+Tailwind+shadcn/ui web/
 flower-delivery/           Digital flower gift app — FastAPI+Postgres in src/,
                            React+TS in web/, read-only admin dashboard in admin/
-arr/kubernetes/            qBittorrent (torrent client behind gluetun VPN) — own README
-openclaw/kubernetes/       vLLM (on cheeky) + Open WebUI — namespace, Deployments, Services, kustomization
+arr/kubernetes/            Prowlarr/Radarr/Sonarr/qBittorrent (behind gluetun VPN) — own README
 bin/                       `homelab` management CLI — own README
 ```
 
@@ -209,16 +233,14 @@ kubectl -n platform create secret generic cloudflared-token --from-literal=token
 kubectl apply -f cloudflare-tunnel/kubernetes/cloudflared-deployment.yaml
 ```
 
-vLLM + Open WebUI (needs `cheeky` GPU-wired first — NVIDIA driver +
-`nvidia-container-toolkit` installed on the host, see `homelab join-cmd`
-node-join docs and the comment in `platform/nvidia-gpu-plugin/kustomization.yaml`):
+**vLLM + Open WebUI** (needs `cheeky` GPU-wired first — NVIDIA driver +
+`nvidia-container-toolkit` on the host): `homelab apply llm`. Full prereqs,
+model config, and rationale: [local-llm/README.md](local-llm/README.md).
 
-```bash
-kubectl apply -f openclaw/kubernetes/00-namespace.yaml
-sudo mkdir -p /srv/openclaw/{vllm-cache,open-webui-data}
-kubectl -n openclaw create secret generic vllm-api-key --from-literal=key="$(openssl rand -hex 32)"
-homelab apply llm
-```
+**Hermes Agent** (needs Zot above, plus `cheeky-mini`'s containerd trusting
+it as an insecure registry, and a hand-built image — no upstream image is
+published): `homelab apply hermes`. Full build/push steps, the Hindsight
+patch, WhatsApp pairing, and Claude opt-in: [hermes/README.md](hermes/README.md).
 
 Then: Tailscale ([tailscale/README.md](tailscale/README.md)) for private access +
 SSH, and configure Cloudflare public hostnames + Access
@@ -226,9 +248,10 @@ SSH, and configure Cloudflare public hostnames + Access
 
 Each other app has its own deploy steps in its own README — doc-catalog
 ([doc-catalog/README.md](doc-catalog/README.md)), flower-delivery
-([flower-delivery/README.md](flower-delivery/README.md)), and the arr stack
-([arr/kubernetes/README.md](arr/kubernetes/README.md)). Monitoring
-(`platform/monitoring/`) is Helm-managed — see its own
+([flower-delivery/README.md](flower-delivery/README.md)), the arr stack
+([arr/kubernetes/README.md](arr/kubernetes/README.md)), and ContainerSSH
+([containerssh/kubernetes/README.md](containerssh/kubernetes/README.md)).
+Monitoring (`platform/monitoring/`) is Helm-managed — see its own
 [README.md](platform/monitoring/README.md).
 
 ## Operate
@@ -241,7 +264,7 @@ homelab status          # nodes, pods, cloudflared, tailscale
 homelab urls            # all service URLs
 homelab creds           # every service credential -> gitignored CREDENTIALS.md
 homelab pgweb-sync      # mirror both Postgres secrets into platform for pgweb
-homelab serve           # re-add tailnet proxies (Headlamp :443, Grafana :8443, Flowers Admin :8092, Traefik :8444, Open WebUI :8094)
+homelab serve           # re-add every tailnet proxy after a reboot (see `homelab urls` for the full list)
 homelab join-cmd        # agent-node join one-liner
 homelab debug [svc]     # diagnostics bundle
 ```
@@ -265,6 +288,15 @@ curl -sfL https://get.k3s.io | K3S_URL=https://192.168.12.21:6443 \
   `nvidia.com/gpu: 1` allocatable, vLLM serving from it.
 - OpenClaw was tried here and removed — broken Control UI chat (unfixed
   upstream CSP bug) and a rigid config schema that fought back at every
-  step. Next agent-orchestration attempt: Hermes Agent
-  (https://github.com/NousResearch/hermes-agent), staged behind a
-  self-hosted Zot registry so custom builds don't depend on a public one.
+  step. Replaced with Hermes Agent
+  (https://github.com/NousResearch/hermes-agent), built from a pinned
+  release tag and pushed to the self-hosted Zot registry.
+- vLLM's model/context history: Qwen2.5-7B-Instruct's native 32768 context,
+  extended via static YaRN RoPE scaling to 65536 — booted clean, no OOM, but
+  real prompts degenerated into repetition-loop garbage (a healthy startup
+  log isn't proof a RoPE hack actually works). Tried Gemma 4 E4B and
+  Llama-3.1-8B next, both rejected too. Landed on
+  `casperhansen/llama-3.2-3b-instruct-awq` — 65536 is *genuinely native* for
+  this model (no RoPE hack), with fp8 KV-cache to fit it in the 3080's
+  VRAM. See [local-llm/README.md](local-llm/README.md) for the current
+  config and why each env var is set the way it is.

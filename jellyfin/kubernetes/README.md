@@ -11,7 +11,9 @@ Single node today, built to stay put when agent nodes join later.
 - The **Seagate USB media store** mounted at `/media/cheeky/seagate_hdd` with
   `Movies/` and `TvShows/` (already in `/etc/fstab`, `uid=1000,gid=1000,nofail`).
 - Intel iGPU at `/dev/dri` (`renderD128` = `render` gid **992**, `card1` =
-  `video` gid **44**).
+  `video` gid **44**), advertised to the cluster as `gpu.intel.com/i915` by
+  the [intel-gpu-plugin](../../platform/intel-gpu-plugin/) device plugin —
+  deploy that first, Jellyfin's pod won't schedule without it.
 
 ## One-time node prep
 ```bash
@@ -34,15 +36,19 @@ kubectl -n media get svc jellyfin      # EXTERNAL-IP = node IP
 ```
 
 ## Before you edit
-- **Timezone:** `20-deployment.yaml` ships `TZ=Etc/UTC`. Change it to your zone.
+- **Timezone:** `20-deployment.yaml` ships `TZ=America/New_York` — change it
+  to your zone if different.
 - **Preserve existing config (optional):** if you want the current
   `/home/cheeky/config/jellyfin` setup, copy it into the PVC after first apply
   (the PVC path is under `/var/lib/rancher/k3s/storage/…-jellyfin-config`; find
   it with `kubectl -n media get pv`).
 
 ## Hardware transcoding
-`/dev/dri` is mounted in and the pod runs with supplemental groups `992` (render)
-and `44` (video), so no `privileged` is needed. In the Jellyfin dashboard enable
+The pod requests `gpu.intel.com/i915: "1"` (the device plugin's cgroup
+allow — a bare hostPath `/dev/dri` mount can't grant a non-privileged pod
+`open()` on the device) and runs with supplemental groups `992` (render)
+and `44` (video) for the underlying file-permission check, so no
+`privileged` is needed either way. In the Jellyfin dashboard enable
 **Hardware acceleration → Intel QuickSync (QSV)** (or VAAPI). Verify:
 ```bash
 kubectl -n media exec deploy/jellyfin -- ls -l /dev/dri     # renderD128 present

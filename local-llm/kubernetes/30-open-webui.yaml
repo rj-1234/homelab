@@ -3,12 +3,12 @@
 # independent of the OpenClaw agent loop. No GPU needed, just proxies HTTP.
 #
 # Host prep on cheeky-mini before first apply:
-#   sudo mkdir -p /srv/openclaw/open-webui-data
+#   sudo mkdir -p /srv/openclaw/open-webui-data   # path kept as-is post-rename, holds real data
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: open-webui
-  namespace: openclaw
+  namespace: local-llm
   labels: { app.kubernetes.io/name: open-webui }
 spec:
   replicas: 1
@@ -23,7 +23,7 @@ spec:
         - name: open-webui
           image: ghcr.io/open-webui/open-webui:main
           env:
-            - { name: OPENAI_API_BASE_URL, value: "http://vllm.openclaw.svc.cluster.local:8000/v1" }
+            - { name: OPENAI_API_BASE_URL, value: "http://vllm.local-llm.svc.cluster.local:8000/v1" }
             - { name: WEBUI_AUTH, value: "true" }
             - name: OPENAI_API_KEY
               valueFrom: { secretKeyRef: { name: vllm-api-key, key: key } }
@@ -47,7 +47,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: open-webui
-  namespace: openclaw
+  namespace: local-llm
   labels: { app.kubernetes.io/name: open-webui }
 spec:
   type: ClusterIP

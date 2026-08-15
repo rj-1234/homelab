@@ -5,6 +5,7 @@
 cloudflared-token*
 *.pem
 *.key
+*.conf
 kubeconfig
 .env
 # OAuth client secrets / tokens (Gmail, etc.) — belong in ~/.config or a k8s Secret

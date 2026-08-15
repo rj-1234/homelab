@@ -1,20 +1,21 @@
 ---
-# Self-hosted OpenAI-compatible inference endpoint for OpenClaw + Open WebUI.
+# Self-hosted OpenAI-compatible inference endpoint — backs Open WebUI and,
+# going forward, Hermes Agent.
 # Model/quant/context/tool-parser are env vars, not baked into the command,
 # so swapping models is `kubectl set env` + `kubectl rollout restart`, not a
 # manifest edit. TOOL_CALL_PARSER must match the model family (hermes for
-# Qwen2/2.5/Hermes, llama3_json for Llama 3.x, mistral for Mistral) — see
-# https://docs.vllm.ai/en/latest/features/tool_calling.html
+# Qwen2/2.5/Hermes, llama3_json for Llama 3.x, mistral for Mistral, gemma4
+# for Gemma 4) — see https://docs.vllm.ai/en/latest/features/tool_calling.html
 #
 # Host prep on cheeky before first apply:
-#   sudo mkdir -p /srv/openclaw/vllm-cache
-#   kubectl -n openclaw create secret generic vllm-api-key \
+#   sudo mkdir -p /srv/openclaw/vllm-cache   # path kept as-is post-rename, real cached weights live here
+#   kubectl -n local-llm create secret generic vllm-api-key \
 #     --from-literal=key="$(openssl rand -hex 32)"
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: vllm
-  namespace: openclaw
+  namespace: local-llm
   labels: { app.kubernetes.io/name: vllm }
 spec:
   replicas: 1
@@ -41,32 +42,39 @@ spec:
               --tool-call-parser "$TOOL_CALL_PARSER"
               --gpu-memory-utilization "$GPU_MEM_UTIL"
               --enforce-eager
+              --kv-cache-dtype "$KV_CACHE_DTYPE"
+              --chat-template "$CHAT_TEMPLATE"
               --served-model-name "$SERVED_MODEL_NAME"
               --api-key "$VLLM_API_KEY"
               --port 8000
           env:
-            - { name: MODEL_ID, value: "Qwen/Qwen2.5-7B-Instruct-AWQ" }
+            # Model-selection history (Qwen2.5 -> YaRN -> Gemma4 -> 3.1-8B,
+            # all rejected before landing here): see memory
+            # vllm-model-selection-history.
+            - { name: MODEL_ID, value: "casperhansen/llama-3.2-3b-instruct-awq" }
             # Slash-free alias for the API-facing `model` field — OpenClaw's
             # config parses model refs as "provider/model", and the raw
             # MODEL_ID (itself containing a "/") collides with that.
-            - { name: SERVED_MODEL_NAME, value: "qwen2.5-7b-instruct-awq" }
+            - { name: SERVED_MODEL_NAME, value: "llama-3.2-3b-instruct-awq" }
             - { name: QUANTIZATION, value: "awq" }
             # RTX 3080 only exposes ~9.64GiB usable (desktop GPU, not
-            # headless) — 0.90 + CUDA graph capture OOM'd at startup.
-            # 0.80 leaves headroom; --enforce-eager (above) drops graph
-            # capture's extra buffer pool entirely, the actual alloc that
-            # failed. Raise this if the model changes and fits with room to
-            # spare.
+            # headless) — 0.90 + CUDA graph capture OOM'd at startup on an
+            # earlier model. Starting conservative again for the same
+            # reason; raise once a clean boot confirms real headroom.
             - { name: GPU_MEM_UTIL, value: "0.80" }
-            # OpenClaw hard-refuses any model with contextWindow < 16000
-            # ("FailoverError: Model context window too small"), and warns
-            # below 32000. 16384 technically cleared the hard floor but the
-            # system prompt + full tool-schema set alone already eats ~7-8k
-            # tokens before any conversation — real requests overflowed and
-            # died as a raw connection failure. Must stay in sync with
-            # `contextWindow` in the pre-seeded openclaw.json provider block.
-            - { name: MAX_MODEL_LEN, value: "32768" }
-            - { name: TOOL_CALL_PARSER, value: "hermes" }
+            # Native context is 128K — targeting 65536 (Hermes's floor) to
+            # leave KV-cache margin on a 10GB card.
+            - { name: MAX_MODEL_LEN, value: "65536" }
+            # fp8 KV-cache needed to fit 65536 tokens in the VRAM left after
+            # weights at 0.80 util; genuinely native 128K context, no RoPE
+            # hack stacked on top. See memory vllm-model-selection-history.
+            - { name: KV_CACHE_DTYPE, value: "fp8" }
+            - { name: TOOL_CALL_PARSER, value: "llama3_json" }
+            # Must match TOOL_CALL_PARSER; without it this model spuriously
+            # calls tools on plain messages. See memory
+            # vllm-model-selection-history for the repro + fallback
+            # (pythonic template/parser) if it resurfaces.
+            - { name: CHAT_TEMPLATE, value: "/vllm-workspace/examples/tool_chat_template_llama3.2_json.jinja" }
             - { name: HF_HOME, value: /root/.cache/huggingface }
             - name: VLLM_API_KEY
               valueFrom: { secretKeyRef: { name: vllm-api-key, key: key } }
@@ -89,7 +97,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: vllm
-  namespace: openclaw
+  namespace: local-llm
   labels: { app.kubernetes.io/name: vllm }
 spec:
   type: ClusterIP

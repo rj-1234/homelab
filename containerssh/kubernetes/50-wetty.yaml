@@ -1,0 +1,52 @@
+---
+# Browser-based terminal, wired to run `ssh` straight into ContainerSSH —
+# same per-session isolated pod backend as the native `ssh -p 2222` path,
+# just fronted by a web page. Uses --ssh-auth=password (NOT --ssh-key —
+# tried that first; Wetty's key mode connects immediately with no prompt
+# regardless of whether the key file has a passphrase, its own startup log
+# admits as much. Password mode is the one that actually prompts live in
+# the browser terminal each session). See README.md for the tradeoff.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wetty
+  namespace: containerssh
+  labels: { app.kubernetes.io/name: wetty }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: wetty } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: wetty } }
+    spec:
+      # Same containerd/Zot-mirror gap as the auth-webhook — irrelevant
+      # here (wettyoss/wetty is a public image), but keeping every
+      # containerssh/ pod on one known-good node for consistency.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - { key: kubernetes.io/hostname, operator: In, values: ["cheeky-mini"] }
+      containers:
+        - name: wetty
+          image: wettyoss/wetty:latest
+          args:
+            - --ssh-host=containerssh.containerssh.svc.cluster.local
+            - --ssh-port=2222
+            - --ssh-auth=password
+          ports: [{ name: http, containerPort: 3000 }]
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wetty
+  namespace: containerssh
+  labels: { app.kubernetes.io/name: wetty }
+spec:
+  type: ClusterIP
+  clusterIP: 10.43.200.56       # pinned for tailscale serve --https
+  selector: { app.kubernetes.io/name: wetty }
+  ports: [{ name: http, port: 3000, targetPort: http }]
