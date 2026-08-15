@@ -211,6 +211,11 @@ Private (Tailscale):
   Zot registry  https://$TAILNET_HOST:8095
   Hermes dash   https://$TAILNET_HOST:8096
   Hindsight UI  https://$TAILNET_HOST:8097
+  Prowlarr      https://$TAILNET_HOST:9696
+  Radarr        https://$TAILNET_HOST:7878
+  Sonarr        https://$TAILNET_HOST:8989
+  ContainerSSH  ssh -p 2222 anyuser@$TAILNET_HOST
+  Wetty         https://$TAILNET_HOST:8098
 
 LAN:
   Jellyfin      http://$(server_ip):8096
@@ -345,7 +350,9 @@ Status & URLs:
 
 Deploy & serve:
   apply [target]       kubectl apply  (jellyfin|platform|monitoring|llm|hermes|all)
-  serve                (re)establish tailscale serve: Headlamp :443, Grafana :$GRAFANA_TS_PORT, Flowers Admin :8092, Traefik :8444, Open WebUI :8094, Zot :8095
+  serve                (re)establish every tailnet proxy: Headlamp, Grafana, Flowers Admin,
+                        Traefik dashboard, Open WebUI, Zot, Hermes dashboard, Hindsight UI,
+                        Prowlarr/Radarr/Sonarr, ContainerSSH, Wetty — see 'homelab urls' for ports
   restart <svc>        rollout restart a service
   logs <svc> [-f]      tail a service's logs
 
@@ -354,6 +361,7 @@ Node-join & debug:
   debug [svc]          diagnostics bundle (+ describe/logs for <svc>)
 
 svc = jellyfin | homepage | headlamp | cloudflared | grafana | prometheus | admin | pgweb | vllm | open-webui | zot | hermes
+(ContainerSSH/Wetty/arr-stack apps aren't in svc_map yet — restart/logs need raw kubectl for those)
 Config via env: HOMELAB_DOMAIN, HOMELAB_TAILNET_HOST, KUBECONFIG, ...
 EOF
 }
