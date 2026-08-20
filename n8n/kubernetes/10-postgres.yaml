@@ -1,0 +1,67 @@
+---
+# Plain postgres:16 (no pgvector needed). Single node: hostPath on a
+# dedicated dataset, pinned to cheeky-mini, isolated from doc-catalog's and
+# flowers' Postgres (separate namespace, separate Secret, separate data
+# dir) — same pattern as those two.
+#
+# Host prep on cheeky-mini before first apply — DirectoryOrCreate makes
+# kubelet auto-create this dir as root:root if missing, and fsGroup doesn't
+# reliably chown hostPath volumes the way it does PVCs, so skipping this
+# CrashLoopBackOffs on "mkdir: cannot create directory
+# '/var/lib/postgresql/data/pgdata': Permission denied":
+#   sudo mkdir -p /srv/n8n/pg && sudo chown 999:999 /srv/n8n/pg
+#
+# Secret is created out-of-band, NEVER committed:
+#   kubectl -n n8n create secret generic n8n-postgres \
+#     --from-literal=POSTGRES_USER=n8n \
+#     --from-literal=POSTGRES_PASSWORD=<pw> \
+#     --from-literal=POSTGRES_DB=n8n
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: n8n
+  labels: { app.kubernetes.io/name: postgres }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app.kubernetes.io/name: postgres } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: postgres } }
+    spec:
+      nodeSelector: { kubernetes.io/hostname: cheeky-mini }
+      securityContext:
+        fsGroup: 999
+        runAsUser: 999
+        runAsGroup: 999
+      containers:
+        - name: postgres
+          image: postgres:16
+          envFrom:
+            - secretRef: { name: n8n-postgres }
+          env:
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports: [{ name: pg, containerPort: 5432 }]
+          volumeMounts:
+            - { name: pgdata, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "n8n"] }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+      volumes:
+        - name: pgdata
+          hostPath: { path: /srv/n8n/pg, type: DirectoryOrCreate }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: n8n
+  labels: { app.kubernetes.io/name: postgres }
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: postgres }
+  ports: [{ name: pg, port: 5432, targetPort: pg }]

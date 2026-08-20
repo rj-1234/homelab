@@ -25,3 +25,11 @@ data:
     database = "flowers"
     sslmode = "disable"
     readonly = true
+  n8n.toml: |
+    host = "postgres.n8n.svc.cluster.local"
+    port = 5432
+    uservar = "N8N_POSTGRES_USER"
+    passwordvar = "N8N_POSTGRES_PASSWORD"
+    database = "n8n"
+    sslmode = "disable"
+    readonly = true

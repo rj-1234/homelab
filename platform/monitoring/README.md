@@ -1,8 +1,9 @@
 # Monitoring — kube-prometheus-stack
 
-Prometheus + Grafana + node-exporter + kube-state-metrics on single-node k3s.
-Grafana is **tailnet-only** (like Headlamp); Alertmanager disabled (dashboards
-only). Namespace `monitoring`.
+Prometheus + Grafana + node-exporter + kube-state-metrics on k3s
+(`cheeky-mini` + `cheeky`, cluster-wide — node-exporter runs as a DaemonSet
+on both). Grafana is **tailnet-only** (like Headlamp); Alertmanager disabled
+(dashboards only). Namespace `monitoring`.
 
 ## Install
 ```bash

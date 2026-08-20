@@ -1,12 +1,12 @@
 ---
-# Shared Postgres browser (pgweb) for both apps' databases — tables, row
+# Shared Postgres browser (pgweb) for every app's database — tables, row
 # counts, and read-only SQL, via pgweb's bookmark picker (bookmarks.yaml
 # ConfigMap mounted at /bookmarks) instead of one pgweb per app.
 # --bookmarks-only hides the manual-connect form; --readonly plus each
 # bookmark's own `readonly = true` both enforce read-only sessions.
-# Secrets are namespace-scoped, so both DB secrets are mirrored here from
-# their home namespaces via `homelab pgweb-sync` — re-run that if either
-# Postgres password ever rotates.
+# Secrets are namespace-scoped, so each DB secret is mirrored here from its
+# home namespace via `homelab pgweb-sync` — re-run that if any Postgres
+# password ever rotates.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -43,6 +43,9 @@ spec:
             - secretRef:
                 name: flowers-postgres-mirror
               prefix: FLOWERS_
+            - secretRef:
+                name: n8n-postgres-mirror
+              prefix: N8N_
           ports:
             - name: http
               containerPort: 8081
