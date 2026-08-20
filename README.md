@@ -294,26 +294,3 @@ Raw equivalents if you prefer: `kubectl get pods -A`,
 curl -sfL https://get.k3s.io | K3S_URL=https://192.168.12.21:6443 \
   K3S_TOKEN=$(sudo cat /var/lib/rancher/k3s/server/node-token) sh -
 ```
-
----
-
-## Known follow-ups
-- Jellyfin → Networking → **Known proxies** = `10.42.0.0/16` (real client IPs behind the tunnel).
-- Dedicated `rpool/media` ZFS dataset once the USB (nearly full) gets tight.
-- `cheeky`'s RTX 3080 is labeled (`homelab/gpu=rtx3080`), driver +
-  `nvidia-container-toolkit` + device plugin all confirmed working —
-  `nvidia.com/gpu: 1` allocatable, vLLM serving from it.
-- OpenClaw was tried here and removed — broken Control UI chat (unfixed
-  upstream CSP bug) and a rigid config schema that fought back at every
-  step. Replaced with Hermes Agent
-  (https://github.com/NousResearch/hermes-agent), built from a pinned
-  release tag and pushed to the self-hosted Zot registry.
-- vLLM's model/context history: Qwen2.5-7B-Instruct's native 32768 context,
-  extended via static YaRN RoPE scaling to 65536 — booted clean, no OOM, but
-  real prompts degenerated into repetition-loop garbage (a healthy startup
-  log isn't proof a RoPE hack actually works). Tried Gemma 4 E4B and
-  Llama-3.1-8B next, both rejected too. Landed on
-  `casperhansen/llama-3.2-3b-instruct-awq` — 65536 is *genuinely native* for
-  this model (no RoPE hack), with fp8 KV-cache to fit it in the 3080's
-  VRAM. See [local-llm/README.md](local-llm/README.md) for the current
-  config and why each env var is set the way it is.
