@@ -1,7 +1,10 @@
 # Jellyfin on k3s
 
-Bare-metal k3s deployment of Jellyfin for the `cheeky-mini` homelab node.
-Single node today, built to stay put when agent nodes join later.
+Bare-metal k3s deployment of Jellyfin, pinned to the `cheeky-mini`
+control-plane node (it owns the USB media store). The cluster also has a
+second node, `cheeky` (GPU agent, see repo root README) — Jellyfin stays on
+`cheeky-mini` regardless via the node label below, since that's where the
+disk physically is.
 
 ## What this assumes about the host
 - **k3s** installed with `--snapshotter=native` (required on the ZFS root);
@@ -17,8 +20,9 @@ Single node today, built to stay put when agent nodes join later.
 
 ## One-time node prep
 ```bash
-# Pin Jellyfin to the node holding the USB media store.
-kubectl label node "$(kubectl get nodes -o name | head -1 | cut -d/ -f2)" \
+# Pin Jellyfin to the node holding the USB media store — name it explicitly,
+# now that the cluster has more than one node.
+kubectl label node cheeky-mini \
   homelab/media-store=seagate node-role.homelab/media=true
 ```
 
@@ -56,10 +60,12 @@ intel_gpu_top                                               # engine load while 
 ```
 
 ## Notes / limits
-- **Single node = pod self-healing only.** k3s restarts crashed pods; it does
-  **not** survive the box dying. True HA needs 3+ control-plane nodes.
+- **One control-plane node = pod self-healing only.** k3s restarts crashed
+  pods on either node; it does **not** survive `cheeky-mini` (the only
+  control-plane/etcd node) dying. True HA needs 3+ control-plane nodes.
 - Media is mounted **read-only**; the USB (NTFS/ntfs-3g) is ~93% full.
-- Adding an agent node later:
+- Adding another agent node (`cheeky`, the GPU box, already joined this way —
+  see repo root README):
   ```bash
   curl -sfL https://get.k3s.io | K3S_URL=https://<server-ip>:6443 \
     K3S_TOKEN=$(sudo cat /var/lib/rancher/k3s/server/node-token) sh -

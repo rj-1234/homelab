@@ -1,17 +1,31 @@
-# homelab — `cheeky-mini`
+# homelab — `cheeky-mini` + `cheeky`
 
-Single-node **k3s** homelab running a Jellyfin media server, a personal
+Two-node **k3s** homelab running a Jellyfin media server, a personal
 **document + field vault** ([doc-catalog](doc-catalog/README.md)), a
 **digital flower gift** app ([flower-delivery](flower-delivery/)), download
 automation ([arr/](arr/kubernetes/README.md)), workflow automation
-([n8n](n8n/README.md)), a metrics stack (Grafana + Prometheus), and a small
-platform stack (dashboard, service hub, secure remote access). Built to
-grow: adding agent nodes later is a one-liner, and workloads that must stay
-on this box are already pinned with node labels/affinity.
+([n8n](n8n/README.md)), local LLM inference ([local-llm](local-llm/README.md)),
+a metrics stack (Grafana + Prometheus), and a small platform stack
+(dashboard, service hub, secure remote access). `cheeky-mini` is the
+control-plane box; `cheeky` joined later as a GPU agent node. Adding further
+agent nodes is a one-liner (see **Add an agent node** below), and workloads
+that must stay on a given box are pinned with node labels/affinity.
 
-> **Resilience honesty:** one node = **pod self-healing only**. k3s restarts
-> crashed pods; it does **not** survive the machine dying. True HA needs 3+
-> control-plane nodes for etcd quorum. This is a foundation for that, not that.
+> **Resilience honesty:** **one control-plane node** = **pod self-healing
+> only**. k3s restarts crashed pods on either node; it does **not** survive
+> `cheeky-mini` (the only control-plane/etcd node) dying — losing `cheeky`
+> just takes the GPU workloads down. True HA needs 3+ control-plane nodes
+> for etcd quorum. This is a foundation for that, not that.
+
+> **Using this as a template:** the services below are *this* homelab's
+> picks — swap in whatever you actually run. What's meant to transfer is the
+> pattern: node/GPU-aware placement (labels + affinity, not hope), a
+> three-lane access model (public tunnel / tailnet-only / cluster-internal
+> so nothing sensitive is one misconfigured Ingress from the internet), and
+> picking the cheapest storage class that meets each workload's durability
+> need (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#2-node--hardware-placement)).
+> The [`homelab` CLI](bin/README.md) and repo layout below are also a
+> reasonable starting skeleton for a second cluster.
 
 ---
 
